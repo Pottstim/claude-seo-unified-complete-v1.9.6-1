@@ -1,0 +1,86 @@
+# Claude SEO Unified Configuration
+# Copy to config.yaml and customize
+
+project:
+  name: "SEO Audit Project"
+  version: "1.9.6-unified"
+  author: "Legrand Consulting"
+
+# Core settings
+core:
+  debug: false
+  log_level: "INFO"
+  log_file: "logs/seo.log"
+  cache_enabled: true
+  cache_dir: ".seo-cache"
+  output_dir: "output"
+  temp_dir: "/tmp/seo-tmp"
+
+# Execution mode
+execution:
+  mode: "auto"  # auto | api | headless
+  prefer_api: true  # Use APIs over browser automation when possible
+  parallel_agents: 9
+  max_concurrent_requests: 15
+  timeout_seconds: 300
+  retry_attempts: 3
+  retry_delay_seconds: 2
+
+# Browser automation (Playwright/Selenium)
+browser:
+  headless: true
+  browser_type: "chromium"  # chromium | firefox | webkit
+  viewport:
+    width: 1920
+    height: 1080
+  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+  disable_images: false
+  disable_javascript: false
+  page_load_timeout: 60000
+  
+# Scoring weights
+scoring:
+  technical: 22
+  content: 23
+  onpage: 20
+  schema: 10
+  performance: 10
+  ai_readiness: 10
+  images: 5
+
+# Report generation
+reports:
+  format: "pdf"  # pdf | html | json | markdown
+  template: "default"
+  include_screenshots: true
+  include_charts: true
+  branding:
+    logo_path: "assets/logo.png"
+    company_name: "Legrand Consulting"
+    primary_color: "#1a73e8"
+    secondary_color: "#34a853"
+
+# Model Context Protocol (MCP)
+mcp:
+  enabled: true
+  server_host: "localhost"
+  server_port: 3000
+  skills_dir: "skills"
+  auto_register: true
+
+# Extensions (optional)
+extensions:
+  dataforseo: false
+  google_apis: false
+  firecrawl: false
+  banana_image: false
+  gemini_image: false
+
+# Environment
+environment:
+  python_version: "3.11"
+  node_version: "20.10.0"
+  required_tools:
+    - playwright
+    - selenium
+    - weasyprint
