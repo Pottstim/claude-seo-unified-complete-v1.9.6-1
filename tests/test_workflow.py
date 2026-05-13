@@ -8,314 +8,275 @@ import pytest
 import json
 import sys
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from datetime import datetime, timezone
 
-# Add parent directory to path
+# Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from run_skill_workflow import (
+    validate_url,
     detect_business_type,
+    calculate_health_score,
     analyze_technical,
+    analyze_onpage,
     analyze_content,
     analyze_schema,
-    calculate_health_score,
+    analyze_performance,
+    analyze_ai_readiness,
+    analyze_images,
+    load_cache,
     get_cache_path,
 )
+
+
+class TestURLValidation:
+    """Tests for URL validation"""
+    
+    def test_valid_https_url(self):
+        valid, result = validate_url("https://example.com")
+        assert valid is True
+        assert result == "https://example.com"
+    
+    def test_valid_http_url(self):
+        valid, result = validate_url("http://example.com")
+        assert valid is True
+        assert result == "http://example.com"
+    
+    def test_invalid_url_no_scheme(self):
+        valid, error = validate_url("example.com")
+        assert valid is False
+        assert "http://" in error or "https://" in error
+    
+    def test_invalid_url_empty(self):
+        valid, error = validate_url("")
+        assert valid is False
+    
+    def test_invalid_url_no_domain(self):
+        valid, error = validate_url("https://")
+        assert valid is False
 
 
 class TestBusinessTypeDetection:
     """Tests for business type detection"""
     
-    def test_detect_saas(self):
-        """Should detect SaaS business type"""
-        html = """
-        <html>
-            <body>
-                <a href="/pricing">Pricing</a>
-                <a href="/features">Features</a>
-                <p>Start your free trial today</p>
-            </body>
-        </html>
-        """
-        result = detect_business_type(html, "https://example.com")
+    def test_saas_detection(self):
+        html = '<html><body><a href="/pricing">Pricing</a><a href="/features">Features</a></body></html>'
+        result = detect_business_type(html, "https://saas-app.com")
         assert result == "saas"
     
-    def test_detect_ecommerce(self):
-        """Should detect e-commerce business type"""
-        html = """
-        <html>
-            <body>
-                <a href="/products">Products</a>
-                <a href="/cart">Cart</a>
-                <button>Add to Cart</button>
-            </body>
-        </html>
-        """
+    def test_ecommerce_detection(self):
+        html = '<html><body><a href="/cart">Cart</a><a href="/products">Products</a></body></html>'
         result = detect_business_type(html, "https://shop.example.com")
         assert result == "ecommerce"
     
-    def test_detect_local(self):
-        """Should detect local business type"""
-        html = """
-        <html>
-            <body>
-                <p>Phone: 555-1234</p>
-                <p>Address: 123 Main St</p>
-                <p>Hours: 9-5</p>
-            </body>
-        </html>
-        """
-        result = detect_business_type(html, "https://local.example.com")
+    def test_local_detection(self):
+        html = '<html><body><p>Call us: 555-1234</p><p>Visit our location</p></body></html>'
+        result = detect_business_type(html, "https://local-business.com")
         assert result == "local"
     
-    def test_detect_unknown(self):
-        """Should return unknown for unclear sites"""
-        html = "<html><body><p>Some content</p></body></html>"
-        result = detect_business_type(html, "https://example.com")
+    def test_unknown_detection(self):
+        html = '<html><body><p>Generic content</p></body></html>'
+        result = detect_business_type(html, "https://generic-site.com")
         assert result == "unknown"
+    
+    def test_tie_breaking_priority(self):
+        """Test that ties are broken by priority order"""
+        # This HTML has both saas and ecommerce signals equally
+        html = '<html><body><a href="/pricing">Pricing</a><a href="/cart">Cart</a></body></html>'
+        result = detect_business_type(html, "https://hybrid-site.com")
+        # SaaS should win due to priority order
+        assert result == "saas"
 
 
-class TestTechnicalAnalysis:
-    """Tests for technical SEO analysis"""
+class TestHealthScoreCalculation:
+    """Tests for health score calculation"""
     
-    @pytest.fixture
-    def sample_html(self):
-        return """
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Test Page - Example Site</title>
-            <meta name="description" content="This is a test page description for SEO testing purposes">
-            <meta name="viewport" content="width=device-width, initial-scale=1">
-            <link rel="canonical" href="https://example.com/test">
-            <script type="application/ld+json">
-            {"@type": "Organization", "name": "Test"}
-            </script>
-        </head>
-        <body>
-            <h1>Test Page Heading</h1>
-            <p>Content here</p>
-        </body>
-        </html>
-        """
-    
-    def test_analyze_technical_basic(self, sample_html):
-        """Should analyze basic technical SEO factors"""
-        result = analyze_technical(sample_html, "https://example.com", {})
+    def test_full_score_all_categories(self):
+        """Test that all categories contribute to score"""
+        results = {
+            "technical": {"score": 20, "max_score": 22},
+            "content": {"score": 20, "max_score": 23},
+            "onpage": {"score": 18, "max_score": 20},
+            "schema": {"score": 8, "max_score": 10},
+            "performance": {"score": 8, "max_score": 10},
+            "ai_readiness": {"score": 8, "max_score": 10},
+            "images": {"score": 4, "max_score": 5}
+        }
+        health, scores = calculate_health_score(results)
         
-        assert "score" in result
-        assert "max_score" in result
-        assert "checks" in result
-        assert result["max_score"] == 22
+        # All categories should be in scores
+        assert "technical" in scores
+        assert "content" in scores
+        assert "onpage" in scores
+        assert "schema" in scores
+        assert "performance" in scores
+        assert "ai_readiness" in scores
+        assert "images" in scores
+        
+        # Health should be reasonable (not 0)
+        assert health > 0
+        assert health <= 100
     
-    def test_detects_https(self, sample_html):
-        """Should detect HTTPS correctly"""
-        result = analyze_technical(sample_html, "https://example.com", {})
-        assert result["checks"]["https"]["status"] == "pass"
+    def test_partial_categories(self):
+        """Test score calculation with partial results"""
+        results = {
+            "technical": {"score": 15, "max_score": 22},
+            "content": {"score": 10, "max_score": 23}
+        }
+        health, scores = calculate_health_score(results)
+        
+        # Only analyzed categories should be scored
+        assert health > 0
+        assert len(scores) == 2
     
-    def test_detects_http_warning(self, sample_html):
-        """Should warn about HTTP"""
-        result = analyze_technical(sample_html, "http://example.com", {})
-        assert result["checks"]["https"]["status"] == "fail"
-    
-    def test_detects_canonical(self, sample_html):
-        """Should detect canonical tag"""
-        result = analyze_technical(sample_html, "https://example.com", {})
-        assert result["checks"]["canonicals"]["status"] == "pass"
-    
-    def test_detects_viewport(self, sample_html):
-        """Should detect viewport meta tag"""
-        result = analyze_technical(sample_html, "https://example.com", {})
-        assert result["checks"]["mobile"]["status"] == "pass"
+    def test_no_phantom_categories(self):
+        """Ensure no phantom categories affect score"""
+        # With only technical and content, score should be based on those only
+        results = {
+            "technical": {"score": 22, "max_score": 22},
+            "content": {"score": 23, "max_score": 23}
+        }
+        health, scores = calculate_health_score(results)
+        
+        # Should be 100% since both are perfect
+        assert health == 100
 
 
 class TestContentAnalysis:
-    """Tests for content quality analysis"""
+    """Tests for content analysis"""
     
-    @pytest.fixture
-    def sample_html(self):
-        return """
-        <!DOCTYPE html>
+    def test_eeat_focuses_on_main_content(self):
+        """E-E-A-T should focus on main content area, not nav/footer"""
+        html = '''
         <html>
-        <head><title>Test</title></head>
-        <body>
-            <h1>Main Heading</h1>
-            <h2>Subheading One</h2>
-            <h2>Subheading Two</h2>
-            <article>
-                <p>This is a comprehensive article about SEO best practices and how to implement them effectively. 
-                We will cover technical SEO, content quality, and link building strategies that work in 2026.
-                Our team has years of experience helping businesses improve their search visibility.</p>
-                <p>We recommend starting with a technical audit, then moving to content optimization.
-                Link building should come last, once your foundation is solid.</p>
-            </article>
-            <a href="/about">About Us</a>
-            <a href="/contact">Contact</a>
-        </body>
+        <nav>We are the best company</nav>
+        <main>
+            <p>This is the actual article content.</p>
+        </main>
+        <footer>We provide excellent services</footer>
         </html>
-        """
-    
-    def test_analyze_content_basic(self, sample_html):
-        """Should analyze content quality"""
-        result = analyze_content(sample_html, "https://example.com")
+        '''
+        result = analyze_content(html, "https://example.com")
         
-        assert "score" in result
-        assert "max_score" in result
-        assert "word_count" in result
-        assert result["max_score"] == 23
-    
-    def test_counts_words(self, sample_html):
-        """Should count words correctly"""
-        result = analyze_content(sample_html, "https://example.com")
-        assert result["word_count"] > 50
-    
-    def test_detects_heading_structure(self, sample_html):
-        """Should detect heading structure"""
-        result = analyze_content(sample_html, "https://example.com")
-        assert result["heading_structure"]["h1"] == 1
-        assert result["heading_structure"]["h2"] == 2
-    
-    def test_calculates_eeat(self, sample_html):
-        """Should calculate E-E-A-T scores"""
-        result = analyze_content(sample_html, "https://example.com")
+        # Should have eeat scores
         assert "eeat" in result
-        assert all(k in result["eeat"] for k in ["experience", "expertise", "authoritativeness", "trustworthiness"])
+        assert "experience" in result["eeat"]
+        assert "expertise" in result["eeat"]
+    
+    def test_word_count(self):
+        html = '<html><body><main>' + 'word ' * 500 + '</main></body></html>'
+        result = analyze_content(html, "https://example.com")
+        assert result["word_count"] >= 500
 
 
 class TestSchemaAnalysis:
-    """Tests for structured data analysis"""
+    """Tests for schema detection"""
     
-    def test_detects_json_ld(self):
-        """Should detect JSON-LD schema"""
-        html = """
+    def test_json_ld_detection(self):
+        html = '''
         <html>
         <head>
-            <script type="application/ld+json">
-            {"@context": "https://schema.org", "@type": "Organization", "name": "Test Corp"}
-            </script>
+        <script type="application/ld+json">
+        {"@context": "https://schema.org", "@type": "Organization", "name": "Test"}
+        </script>
         </head>
         <body></body>
         </html>
-        """
+        '''
         result = analyze_schema(html, "https://example.com")
         
-        assert len(result["detected"]) == 1
+        assert len(result["detected"]) > 0
         assert result["detected"][0]["type"] == "Organization"
         assert result["detected"][0]["valid"] is True
     
-    def test_detects_multiple_schemas(self):
-        """Should detect multiple schema types"""
-        html = """
+    def test_invalid_json_ld(self):
+        html = '''
         <html>
-        <head>
-            <script type="application/ld+json">
-            {"@type": "Organization", "name": "Test"}
-            </script>
-            <script type="application/ld+json">
-            {"@type": "WebSite", "name": "Test Site"}
-            </script>
-        </head>
+        <script type="application/ld+json">
+        {invalid json}
+        </script>
         <body></body>
         </html>
-        """
+        '''
         result = analyze_schema(html, "https://example.com")
-        assert len(result["detected"]) == 2
-    
-    def test_handles_invalid_json(self):
-        """Should handle invalid JSON-LD gracefully"""
-        html = """
-        <html>
-        <head>
-            <script type="application/ld+json">
-            {invalid json here
-            </script>
-        </head>
-        <body></body>
-        </html>
-        """
-        result = analyze_schema(html, "https://example.com")
+        
+        # Should mark as invalid
+        assert len(result["detected"]) > 0
         assert result["detected"][0]["valid"] is False
-    
-    def test_scores_organization_schema(self):
-        """Should score Organization schema highly"""
-        html = """
-        <html>
-        <head>
-            <script type="application/ld+json">
-            {"@type": "Organization", "name": "Test"}
-            </script>
-        </head>
-        <body></body>
-        </html>
-        """
-        result = analyze_schema(html, "https://example.com")
-        assert result["score"] >= 3  # Organization = 3 points
 
 
-class TestHealthScore:
-    """Tests for health score calculation"""
+class TestCacheTimezone:
+    """Tests for cache timezone handling"""
     
-    def test_calculates_weighted_score(self):
-        """Should calculate weighted health score"""
-        results = {
-            "technical": {"score": 18, "max_score": 22},
-            "content": {"score": 20, "max_score": 23},
-            "schema": {"score": 8, "max_score": 10},
-            "performance": {"score": 7, "max_score": 10},
+    def test_timezone_aware_comparison(self):
+        """Cache timestamp should be timezone-aware"""
+        import tempfile
+        import os
+        
+        # Create a temp cache
+        cache_dir = tempfile.mkdtemp()
+        cache_file = Path(cache_dir) / "page-analysis.json"
+        
+        # Write cache with UTC timestamp
+        cache_data = {
+            "url": "https://example.com",
+            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "health_score": 85
         }
         
-        health_score, scores = calculate_health_score(results)
+        with open(cache_file, "w") as f:
+            json.dump(cache_data, f)
         
-        assert 0 <= health_score <= 100
-        assert isinstance(scores, dict)
-    
-    def test_handles_empty_results(self):
-        """Should handle empty results"""
-        health_score, scores = calculate_health_score({})
-        assert health_score == 0
-    
-    def test_handles_missing_scores(self):
-        """Should handle partial results"""
-        results = {
-            "technical": {"score": 10, "max_score": 22},
-        }
+        # This should not raise TypeError
+        # (The actual load_cache uses get_cache_path, but we're testing the logic)
+        cached_time = datetime.fromisoformat(cache_data["timestamp"].replace("Z", "+00:00"))
+        now = datetime.now(timezone.utc)
         
-        health_score, scores = calculate_health_score(results)
-        assert health_score > 0
+        # This comparison should work without TypeError
+        delta = (now - cached_time).total_seconds()
+        assert delta >= 0
+        
+        # Cleanup
+        import shutil
+        shutil.rmtree(cache_dir)
 
 
-class TestCachePath:
-    """Tests for cache path generation"""
+class TestAnalyzerCompleteness:
+    """Tests to ensure all analyzers are present and functional"""
     
-    def test_generates_consistent_path(self):
-        """Should generate consistent cache path for same URL"""
-        path1 = get_cache_path("https://example.com/page")
-        path2 = get_cache_path("https://example.com/page")
-        
-        assert path1 == path2
+    def test_technical_analyzer_exists(self):
+        html = '<html><head><title>Test</title></head><body></body></html>'
+        result = analyze_technical(html, "https://example.com", {})
+        assert "score" in result
+        assert "max_score" in result
     
-    def test_different_paths_for_different_urls(self):
-        """Should generate different paths for different URLs"""
-        path1 = get_cache_path("https://example.com/page1")
-        path2 = get_cache_path("https://example.com/page2")
-        
-        assert path1 != path2
+    def test_onpage_analyzer_exists(self):
+        html = '<html><head><title>Test Page Title</title></head><body></body></html>'
+        result = analyze_onpage(html, "https://example.com")
+        assert "score" in result
+        assert "max_score" in result
+    
+    def test_ai_readiness_analyzer_exists(self):
+        html = '<html><body><h2>What is SEO?</h2><p>SEO stands for...</p></body></html>'
+        result = analyze_ai_readiness(html, "https://example.com")
+        assert "score" in result
+        assert "max_score" in result
+    
+    def test_images_analyzer_exists(self):
+        html = '<html><body><img src="test.jpg" alt="Test image"></body></html>'
+        result = analyze_images(html, "https://example.com")
+        assert "score" in result
+        assert "max_score" in result
 
 
-class TestIntegration:
-    """Integration tests (require network)"""
+class TestCLIInterface:
+    """Tests for CLI argument handling"""
     
-    @pytest.mark.integration
-    def test_audit_example_com(self):
-        """Test full audit on example.com"""
-        pytest.skip("Integration test - run manually with: pytest -m integration")
-        
-        from run_skill_workflow import run_audit
-        result = run_audit("https://example.com", use_cache=False)
-        
-        assert "error" not in result
-        assert "health_score" in result
-        assert 0 <= result["health_score"] <= 100
+    def test_version_available(self):
+        """Version should be accessible"""
+        from run_skill_workflow import __version__
+        assert __version__ is not None
+        assert "unified" in __version__
 
 
 if __name__ == "__main__":

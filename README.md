@@ -2,7 +2,7 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.9.6--unified-green.svg)](https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1)
+[![Version](https://img.shields.io/badge/version-1.9.7--unified-green.svg)](https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1)
 
 **Combined best-of-both from Claude SEO + Codex SEO**
 
@@ -185,15 +185,52 @@ Generate SEO images (OG previews, hero images, product photos).
 Run workflows programmatically without Claude Desktop:
 
 ```bash
-# Single workflow
-python scripts/run_skill_workflow.py --skill seo-technical https://example.com --json
+# Full SEO audit
+python scripts/run_skill_workflow.py audit --url https://example.com --json
 
-# Full smoke suite (all workflows)
-python scripts/run_api_smoke_suite.py https://example.com --json
+# Technical SEO only
+python scripts/run_skill_workflow.py technical --url https://example.com --json
+
+# Content analysis
+python scripts/run_skill_workflow.py content --url https://example.com --json
+
+# Schema detection
+python scripts/run_skill_workflow.py schema --url https://example.com --json
+
+# Drift monitoring
+python scripts/run_skill_workflow.py drift-baseline --url https://example.com
+python scripts/run_skill_workflow.py drift-compare --url https://example.com
+
+# Output formats
+python scripts/run_skill_workflow.py audit --url https://example.com --format markdown --output report.md
+python scripts/run_skill_workflow.py audit --url https://example.com --format yaml
+
+# Bypass cache
+python scripts/run_skill_workflow.py audit --url https://example.com --refresh
+
+# Limit recommendations
+python scripts/run_skill_workflow.py audit --url https://example.com --max-recommendations 20
+
+# Show version
+python scripts/run_skill_workflow.py --version
 
 # Verify environment
 python scripts/verify_environment.py --target https://example.com --json
 ```
+
+### CLI Reference
+
+| Argument | Description |
+|----------|-------------|
+| `workflow` | One of: audit, technical, content, schema, drift-baseline, drift-compare |
+| `--url` | Target URL (required, must start with http:// or https://) |
+| `--format` | Output format: json (default), yaml, or markdown |
+| `--output` | Save output to file |
+| `--refresh` | Bypass cache, fetch fresh data |
+| `--no-cache` | Disable caching entirely |
+| `--max-recommendations` | Max recommendations to show (default: 10) |
+| `--version` | Show version number |
+| `--config` | Path to config file (default: config/config.yaml) |
 
 ## Architecture
 
@@ -284,6 +321,19 @@ Built for Claude Desktop by the AI Marketing Hub community.
 **Version:** 1.9.6-unified
 
 ### Changelog
+
+**v1.9.7-unified (2026-05-13)**
+- **Fixed critical bugs identified in code review:**
+  - Added all missing analyzers (onpage, ai_readiness, images) to fix phantom category scores
+  - Fixed cache timezone bug (aware vs naive datetime comparison)
+  - Removed unused asyncio/aiohttp imports
+  - Added URL validation with proper error messages
+  - Fixed business type detection tie-breaking with explicit priority
+  - Improved E-E-A-T detection to focus on main content area only
+  - Added --max-recommendations CLI flag
+  - Added --version flag
+  - Updated README CLI syntax to match actual argparse interface
+  - Added comprehensive CLI reference table
 
 **v1.9.6-unified (2026-05-13)**
 - Added MIT LICENSE file

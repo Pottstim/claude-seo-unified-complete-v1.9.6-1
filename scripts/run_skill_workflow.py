@@ -4,12 +4,12 @@ Headless workflow executor for claude-seo-unified
 Enables deterministic execution in CI/CD, cron, or API mode
 """
 
+__version__ = "1.9.6-unified"
+
 import sys
 import os
 import json
 import argparse
-import asyncio
-import aiohttp
 import hashlib
 import re
 from pathlib import Path
@@ -70,6 +70,21 @@ def load_config(config_path: str = "config/config.yaml") -> Dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def validate_url(url: str) -> Tuple[bool, str]:
+    """Validate URL format and scheme"""
+    if not url:
+        return False, "URL is required"
+    
+    if not url.startswith(("http://", "https://")):
+        return False, "URL must start with http:// or https://"
+    
+    parsed = urlparse(url)
+    if not parsed.netloc:
+        return False, "Invalid URL: missing domain"
+    
+    return True, url
+
+
 def get_cache_path(url: str) -> Path:
     """Get cache directory for a URL"""
     url_hash = hashlib.md5(url.encode()).hexdigest()[:8]
@@ -84,7 +99,11 @@ def load_cache(url: str) -> Optional[Dict[str, Any]]:
         with open(cache_path) as f:
             data = json.load(f)
             # Check if cache is recent (less than 24 hours)
-            cached_time = datetime.fromisoformat(data.get("timestamp", "2000-01-01"))
+            timestamp_str = data.get("timestamp", "2000-01-01T00:00:00+00:00")
+            # Ensure timezone-aware parsing
+            if not timestamp_str.endswith(("Z", "+00:00")):
+                timestamp_str += "+00:00"
+            cached_time = datetime.fromisoformat(timestamp_str.replace("Z", "+00:00"))
             if (datetime.now(timezone.utc) - cached_time).total_seconds() < 86400:
                 return data
     return None
@@ -98,8 +117,12 @@ def save_cache(url: str, data: Dict[str, Any]) -> None:
         json.dump(data, f, indent=2)
 
 
+# Business type detection with explicit priority for ties
+BUSINESS_TYPE_PRIORITY = ["saas", "ecommerce", "agency", "local", "publisher"]
+
+
 def detect_business_type(html: str, url: str) -> str:
-    """Detect business type from page content"""
+    """Detect business type from page content with tie-breaking"""
     url_lower = url.lower()
     html_lower = html.lower()
     
@@ -116,9 +139,19 @@ def detect_business_type(html: str, url: str) -> str:
         score = sum(1 for kw in keywords if kw in url_lower or kw in html_lower)
         scores[biz_type] = score
     
-    if max(scores.values()) > 0:
-        return max(scores, key=scores.get)
-    return "unknown"
+    max_score = max(scores.values()) if scores else 0
+    if max_score == 0:
+        return "unknown"
+    
+    # Get all types with max score
+    top_types = [t for t, s in scores.items() if s == max_score]
+    
+    # Use priority order for tie-breaking
+    for biz_type in BUSINESS_TYPE_PRIORITY:
+        if biz_type in top_types:
+            return biz_type
+    
+    return top_types[0]  # Fallback
 
 
 def analyze_technical(html: str, url: str, headers: Dict[str, str]) -> Dict[str, Any]:
@@ -210,6 +243,77 @@ def analyze_technical(html: str, url: str, headers: Dict[str, str]) -> Dict[str,
     }
 
 
+def analyze_onpage(html: str, url: str) -> Dict[str, Any]:
+    """Analyze on-page SEO factors"""
+    if not BS4_AVAILABLE:
+        return {"score": 0, "max_score": 20, "error": "BeautifulSoup not available"}
+    
+    soup = BeautifulSoup(html, 'lxml')
+    score = 0
+    max_score = 20
+    checks = {}
+    issues = []
+    
+    # Title length (optimal: 50-60 chars)
+    title = soup.find("title")
+    title_text = title.get_text() if title else ""
+    title_len = len(title_text)
+    if 50 <= title_len <= 60:
+        score += 5
+        checks["title_length"] = {"status": "pass", "length": title_len}
+    elif title_len > 0:
+        score += 2
+        checks["title_length"] = {"status": "warning", "length": title_len, "optimal": "50-60"}
+    else:
+        checks["title_length"] = {"status": "fail", "issue": "Missing title"}
+        issues.append({"severity": "high", "issue": "Missing page title"})
+    
+    # Meta description length (optimal: 150-160 chars)
+    meta_desc = soup.find("meta", {"name": "description"})
+    desc_content = meta_desc.get("content", "") if meta_desc else ""
+    desc_len = len(desc_content)
+    if 150 <= desc_len <= 160:
+        score += 5
+        checks["meta_desc_length"] = {"status": "pass", "length": desc_len}
+    elif desc_len > 0:
+        score += 2
+        checks["meta_desc_length"] = {"status": "warning", "length": desc_len, "optimal": "150-160"}
+    else:
+        checks["meta_desc_length"] = {"status": "fail", "issue": "Missing meta description"}
+        issues.append({"severity": "medium", "issue": "Missing meta description"})
+    
+    # Heading hierarchy
+    h1_count = len(soup.find_all("h1"))
+    h2_count = len(soup.find_all("h2"))
+    h3_count = len(soup.find_all("h3"))
+    
+    if h1_count == 1:
+        score += 5
+        checks["heading_hierarchy"] = {"status": "pass", "h1": h1_count, "h2": h2_count}
+    elif h1_count == 0:
+        checks["heading_hierarchy"] = {"status": "fail", "h1": 0}
+        issues.append({"severity": "high", "issue": "No H1 tag found"})
+    else:
+        checks["heading_hierarchy"] = {"status": "warning", "h1": h1_count, "note": "Multiple H1s"}
+        issues.append({"severity": "medium", "issue": f"Multiple H1 tags ({h1_count})"})
+    
+    # Internal links
+    links = soup.find_all("a", href=True)
+    internal_links = [l for l in links if urlparse(l["href"]).netloc == urlparse(url).netloc or l["href"].startswith("/")]
+    if len(internal_links) >= 3:
+        score += 5
+        checks["internal_links"] = {"status": "pass", "count": len(internal_links)}
+    else:
+        checks["internal_links"] = {"status": "warning", "count": len(internal_links)}
+    
+    return {
+        "score": score,
+        "max_score": max_score,
+        "checks": checks,
+        "issues": issues
+    }
+
+
 def analyze_content(html: str, url: str) -> Dict[str, Any]:
     """Analyze content quality and E-E-A-T"""
     if not BS4_AVAILABLE:
@@ -219,11 +323,15 @@ def analyze_content(html: str, url: str) -> Dict[str, Any]:
     score = 0
     max_score = 23
     
+    # Focus on main content areas only (not nav, footer, etc.)
+    main_content = soup.find("main") or soup.find("article") or soup.find("div", class_=re.compile(r"(content|post|article|entry)", re.I)) or soup
+    content_text = main_content.get_text()
+    
     # Remove script and style for text analysis
-    for element in soup(["script", "style", "nav", "footer"]):
+    for element in main_content(["script", "style", "nav", "footer", "header", "aside"]):
         element.decompose()
     
-    text = soup.get_text()
+    text = main_content.get_text()
     words = text.split()
     word_count = len(words)
     
@@ -233,13 +341,41 @@ def analyze_content(html: str, url: str) -> Dict[str, Any]:
     elif word_count > 500:
         score += 1
     
-    # E-E-A-T signals (simplified)
+    # E-E-A-T signals - only look in main content area
     eeat = {
-        "experience": 3 if any(kw in text.lower() for kw in ["we", "our", "i", "my"]) else 1,
-        "expertise": 4 if soup.find("article") or soup.find("time") else 2,
-        "authoritativeness": 3 if soup.find_all("a", href=True) else 1,
-        "trustworthiness": 3 if soup.find("a", href="/about") or soup.find("a", href="/contact") else 1
+        "experience": 0,
+        "expertise": 0,
+        "authoritativeness": 0,
+        "trustworthiness": 0
     }
+    
+    # Experience signals - look for first-person in content area only
+    text_lower = text.lower()
+    if any(kw in text_lower for kw in ["i have", "i've", "we have", "our experience", "in my experience"]):
+        eeat["experience"] = 3
+    else:
+        eeat["experience"] = 1
+    
+    # Expertise signals - structured content, citations, data
+    if soup.find("article") or soup.find("time"):
+        eeat["expertise"] = 4
+    elif soup.find("cite") or soup.find_all("a", href=re.compile(r"(source|citation|reference)", re.I)):
+        eeat["expertise"] = 3
+    else:
+        eeat["expertise"] = 2
+    
+    # Authoritativeness - external links, author info
+    if soup.find_all("a", href=True) and len(soup.find_all("a", href=True)) > 3:
+        eeat["authoritativeness"] = 3
+    else:
+        eeat["authoritativeness"] = 1
+    
+    # Trustworthiness - contact, about, privacy
+    if soup.find("a", href=re.compile(r"(about|contact|privacy|terms)", re.I)):
+        eeat["trustworthiness"] = 3
+    else:
+        eeat["trustworthiness"] = 1
+    
     score += sum(eeat.values())
     
     # Heading structure
@@ -338,6 +474,105 @@ def analyze_performance(html: str, url: str) -> Dict[str, Any]:
     }
 
 
+def analyze_ai_readiness(html: str, url: str) -> Dict[str, Any]:
+    """Analyze AI search readiness (GEO)"""
+    if not BS4_AVAILABLE:
+        return {"score": 0, "max_score": 10, "error": "BeautifulSoup not available"}
+    
+    soup = BeautifulSoup(html, 'lxml')
+    score = 0
+    max_score = 10
+    checks = {}
+    
+    # Check for FAQ structured content
+    faq_items = soup.find_all(["dt", "dd"]) or soup.find_all(class_=re.compile(r"faq", re.I))
+    if faq_items:
+        score += 2
+        checks["faq_content"] = {"status": "pass", "count": len(faq_items)}
+    else:
+        checks["faq_content"] = {"status": "warning", "details": "No FAQ content detected"}
+    
+    # Check for clear Q&A format
+    headings = soup.find_all(["h2", "h3"])
+    question_headings = [h for h in headings if h.get_text().strip().endswith("?")]
+    if question_headings:
+        score += 2
+        checks["question_headings"] = {"status": "pass", "count": len(question_headings)}
+    
+    # Check for structured lists (AI-friendly)
+    lists = soup.find_all(["ul", "ol"])
+    if len(lists) >= 2:
+        score += 2
+        checks["structured_lists"] = {"status": "pass", "count": len(lists)}
+    
+    # Check for definition lists
+    dl = soup.find_all("dl")
+    if dl:
+        score += 2
+        checks["definition_lists"] = {"status": "pass"}
+    
+    # Check for clear, concise intro
+    paragraphs = soup.find_all("p")
+    if paragraphs and 50 <= len(paragraphs[0].get_text()) <= 200:
+        score += 2
+        checks["intro_paragraph"] = {"status": "pass"}
+    
+    return {
+        "score": score,
+        "max_score": max_score,
+        "checks": checks,
+        "issues": []
+    }
+
+
+def analyze_images(html: str, url: str) -> Dict[str, Any]:
+    """Analyze image SEO"""
+    if not BS4_AVAILABLE:
+        return {"score": 0, "max_score": 5, "error": "BeautifulSoup not available"}
+    
+    soup = BeautifulSoup(html, 'lxml')
+    score = 0
+    max_score = 5
+    issues = []
+    
+    images = soup.find_all("img")
+    
+    if not images:
+        return {"score": 5, "max_score": 5, "images": 0, "issues": [], "note": "No images found"}
+    
+    # Check alt text
+    with_alt = [img for img in images if img.get("alt")]
+    alt_ratio = len(with_alt) / len(images) if images else 0
+    
+    if alt_ratio >= 0.9:
+        score += 2
+    elif alt_ratio >= 0.5:
+        score += 1
+    else:
+        issues.append({"severity": "medium", "issue": f"Only {int(alt_ratio*100)}% of images have alt text"})
+    
+    # Check lazy loading
+    lazy_images = [img for img in images if img.get("loading") == "lazy"]
+    if len(lazy_images) >= len(images) * 0.5:
+        score += 2
+    elif lazy_images:
+        score += 1
+    
+    # Check for large image warnings (width/height attributes)
+    sized_images = [img for img in images if img.get("width") and img.get("height")]
+    if len(sized_images) >= len(images) * 0.8:
+        score += 1
+    
+    return {
+        "score": score,
+        "max_score": max_score,
+        "images": len(images),
+        "with_alt": len(with_alt),
+        "alt_ratio": round(alt_ratio, 2),
+        "issues": issues
+    }
+
+
 def calculate_health_score(results: Dict[str, Dict]) -> Tuple[int, Dict[str, int]]:
     """Calculate overall SEO health score"""
     weights = {
@@ -355,7 +590,7 @@ def calculate_health_score(results: Dict[str, Dict]) -> Tuple[int, Dict[str, int
     total_score = 0
     
     for category, weight in weights.items():
-        if category in results:
+        if category in results and "error" not in results[category]:
             result = results[category]
             cat_score = result.get("score", 0)
             cat_max = result.get("max_score", weight)
@@ -363,14 +598,28 @@ def calculate_health_score(results: Dict[str, Dict]) -> Tuple[int, Dict[str, int
             scores[category] = round(normalized)
             total_score += normalized
             total_weight += weight
+        elif category in weights:
+            # Category not analyzed, skip from weight calculation
+            pass
     
+    # Only count weight for categories that were actually analyzed
     health_score = round((total_score / total_weight) * 100) if total_weight > 0 else 0
     return health_score, scores
 
 
-def run_audit(url: str, use_cache: bool = True, refresh: bool = False) -> Dict[str, Any]:
+def run_audit(url: str, use_cache: bool = True, refresh: bool = False, max_recommendations: int = 10) -> Dict[str, Any]:
     """Execute full SEO audit"""
     logger.info(f"Starting SEO audit for: {url}")
+    
+    # Validate URL
+    valid, url_or_error = validate_url(url)
+    if not valid:
+        return {
+            "error": url_or_error,
+            "url": url,
+            "timestamp": datetime.now(timezone.utc).isoformat()
+        }
+    url = url_or_error
     
     # Check cache
     if use_cache and not refresh:
@@ -389,7 +638,7 @@ def run_audit(url: str, use_cache: bool = True, refresh: bool = False) -> Dict[s
     # Fetch page
     try:
         response = requests.get(url, timeout=30, headers={
-            "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36"
+            "User-Agent": "Mozilla/5.0 (compatible; ClaudeSEO-Bot/1.9.6; +https://github.com/Pottstim/claude-seo-unified)"
         })
         response.raise_for_status()
         html = response.text
@@ -404,13 +653,16 @@ def run_audit(url: str, use_cache: bool = True, refresh: bool = False) -> Dict[s
     # Detect business type
     business_type = detect_business_type(html, url)
     
-    # Run analyses
+    # Run all analyses
     results = {}
     
     results["technical"] = analyze_technical(html, url, headers)
+    results["onpage"] = analyze_onpage(html, url)
     results["content"] = analyze_content(html, url)
     results["schema"] = analyze_schema(html, url)
     results["performance"] = analyze_performance(html, url)
+    results["ai_readiness"] = analyze_ai_readiness(html, url)
+    results["images"] = analyze_images(html, url)
     
     # Calculate health score
     health_score, scores = calculate_health_score(results)
@@ -424,7 +676,8 @@ def run_audit(url: str, use_cache: bool = True, refresh: bool = False) -> Dict[s
     
     # Generate recommendations
     recommendations = []
-    for issue in sorted(all_issues, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x.get("severity", "low"), 3)):
+    severity_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+    for issue in sorted(all_issues, key=lambda x: severity_order.get(x.get("severity", "low"), 3)):
         recommendations.append({
             "priority": issue.get("severity", "medium"),
             "action": issue.get("issue", "Unknown issue"),
@@ -439,7 +692,7 @@ def run_audit(url: str, use_cache: bool = True, refresh: bool = False) -> Dict[s
         "business_type": business_type,
         "details": results,
         "issues": all_issues,
-        "recommendations": recommendations[:10]  # Top 10
+        "recommendations": recommendations[:max_recommendations]
     }
     
     # Save to cache
@@ -451,6 +704,12 @@ def run_audit(url: str, use_cache: bool = True, refresh: bool = False) -> Dict[s
 
 def run_technical(url: str) -> Dict[str, Any]:
     """Run technical SEO analysis only"""
+    # Validate URL
+    valid, url_or_error = validate_url(url)
+    if not valid:
+        return {"error": url_or_error, "url": url}
+    url = url_or_error
+    
     if not REQUESTS_AVAILABLE:
         return {"error": "requests library not installed"}
     
@@ -464,6 +723,12 @@ def run_technical(url: str) -> Dict[str, Any]:
 
 def run_content(url: str) -> Dict[str, Any]:
     """Run content analysis only"""
+    # Validate URL
+    valid, url_or_error = validate_url(url)
+    if not valid:
+        return {"error": url_or_error, "url": url}
+    url = url_or_error
+    
     if not REQUESTS_AVAILABLE:
         return {"error": "requests library not installed"}
     
@@ -477,6 +742,12 @@ def run_content(url: str) -> Dict[str, Any]:
 
 def run_schema(url: str) -> Dict[str, Any]:
     """Run schema analysis only"""
+    # Validate URL
+    valid, url_or_error = validate_url(url)
+    if not valid:
+        return {"error": url_or_error, "url": url}
+    url = url_or_error
+    
     if not REQUESTS_AVAILABLE:
         return {"error": "requests library not installed"}
     
@@ -514,7 +785,7 @@ def run_drift_compare(url: str) -> Dict[str, Any]:
     if not baseline_path.exists():
         return {
             "error": "No baseline found",
-            "message": "Run 'drift baseline' first to capture a baseline"
+            "message": "Run 'drift-baseline' first to capture a baseline"
         }
     
     with open(baseline_path) as f:
@@ -581,30 +852,47 @@ Examples:
   python run_skill_workflow.py technical --url https://example.com --json
   python run_skill_workflow.py drift-baseline --url https://example.com
   python run_skill_workflow.py drift-compare --url https://example.com
+  python run_skill_workflow.py --version
         """
     )
     
     parser.add_argument(
         "workflow",
+        nargs="?",
         choices=["audit", "technical", "content", "schema", "drift-baseline", "drift-compare"],
         help="Workflow to execute"
     )
-    parser.add_argument("--url", required=True, help="Target URL")
+    parser.add_argument("--url", help="Target URL (must include http:// or https://)")
     parser.add_argument("--format", choices=["json", "yaml", "markdown"], default="json",
                        help="Output format")
     parser.add_argument("--output", help="Output file path")
     parser.add_argument("--config", default="config/config.yaml", help="Config file")
     parser.add_argument("--refresh", action="store_true", help="Ignore cache, fetch fresh data")
     parser.add_argument("--no-cache", action="store_true", help="Disable caching")
+    parser.add_argument("--max-recommendations", type=int, default=10, 
+                       help="Maximum number of recommendations to show (default: 10)")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     
     args = parser.parse_args()
+    
+    # Handle --version
+    if not args.workflow:
+        parser.print_help()
+        return 0
+    
+    # Validate URL is provided for workflows that need it
+    if args.workflow not in ["help"] and not args.url:
+        print("Error: --url is required for this workflow", file=sys.stderr)
+        print("Example: python run_skill_workflow.py audit --url https://example.com", file=sys.stderr)
+        return 1
     
     # Load config (for future extensions)
     config = load_config(args.config)
     
     # Execute workflow
     if args.workflow == "audit":
-        result = run_audit(args.url, use_cache=not args.no_cache, refresh=args.refresh)
+        result = run_audit(args.url, use_cache=not args.no_cache, refresh=args.refresh, 
+                          max_recommendations=args.max_recommendations)
     elif args.workflow == "technical":
         result = run_technical(args.url)
     elif args.workflow == "content":
@@ -646,7 +934,7 @@ Examples:
         
         if result.get("recommendations"):
             lines.extend(["", "## Recommendations", ""])
-            for rec in result.get("recommendations", [])[:10]:
+            for rec in result.get("recommendations", []):
                 lines.append(f"- [{rec.get('priority', 'medium').upper()}] {rec.get('action', 'N/A')}")
         
         output_content = "\n".join(lines)

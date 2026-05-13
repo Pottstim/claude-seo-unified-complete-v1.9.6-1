@@ -1,56 +1,52 @@
 version: '3.8'
 
 services:
-  api:
-    build: .
-    container_name: seo-api
-    ports:
-      - "5000:5000"
+  claude-seo:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    container_name: claude-seo-unified
     environment:
-      - DATABASE_URL=postgresql://seoapp:seopass@postgres:5432/seo_production
-      - REDIS_URL=redis://redis:6379/0
-    env_file:
-      - .env
+      - PYTHONUNBUFFERED=1
+      # LLM Provider (choose one)
+      # - OLLAMA_HOST=host.docker.internal:11434
+      # - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      # - OPENAI_API_KEY=${OPENAI_API_KEY}
+      
+      # Performance Provider
+      - GOOGLE_PAGESPEED_API_KEY=${GOOGLE_PAGESPEED_API_KEY:-}
+      
+      # SERP Provider (optional)
+      # - SERPAPI_KEY=${SERPAPI_KEY}
+      # - DATAFORSEO_USER=${DATAFORSEO_USER}
+      # - DATAFORSEO_PASSWORD=${DATAFORSEO_PASSWORD}
+      
+      # Analytics (optional)
+      - GOOGLE_APPLICATION_CREDENTIALS=/app/config/credentials.json
     volumes:
-      - ./logs:/app/logs
-      - ./output:/app/output
-      - ./.seo-cache:/app/.seo-cache
-    depends_on:
-      - postgres
-      - redis
-    restart: unless-stopped
+      - ..:/app
+      - seo-cache:/app/.seo-cache
+      - seo-output:/app/output
+    working_dir: /app
+    command: python scripts/run_skill_workflow.py --help
 
-  postgres:
-    image: postgres:15-alpine
-    container_name: seo-postgres
-    environment:
-      POSTGRES_DB: seo_production
-      POSTGRES_USER: seoapp
-      POSTGRES_PASSWORD: seopass
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    restart: unless-stopped
-
-  redis:
-    image: redis:7-alpine
-    container_name: seo-redis
-    volumes:
-      - redis_data:/data
-    restart: unless-stopped
-
-  nginx:
-    image: nginx:alpine
-    container_name: seo-nginx
+  # Ollama for local LLM (free)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
     ports:
-      - "80:80"
-      - "443:443"
+      - "11434:11434"
     volumes:
-      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf
-      - ./deploy/ssl:/etc/nginx/ssl
-    depends_on:
-      - api
-    restart: unless-stopped
+      - ollama-data:/root/.ollama
+    profiles:
+      - local-llm
 
 volumes:
-  postgres_data:
-  redis_data:
+  seo-cache:
+  seo-output:
+  ollama-data:
+
+# Usage:
+# docker-compose up claude-seo
+# docker-compose --profile local-llm up  # Includes Ollama
+# docker-compose run claude-seo python scripts/run_skill_workflow.py audit --url https://example.com
