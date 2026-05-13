@@ -25,4 +25,4 @@ RUN mkdir -p logs output .seo-cache config/credentials
 
 EXPOSE 5000
 
-CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5000", "--timeout", "300", "api_server:app"]
+CMD ["gunicorn", "--workers", "4", "--bind", "0.0.0.0:5000", "--timeout", "300", "scripts.api_server:app"]

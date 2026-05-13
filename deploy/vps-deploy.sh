@@ -11,7 +11,7 @@ NC='\033[0m'
 
 echo -e "${GREEN}╔═══════════════════════════════════════════════╗${NC}"
 echo -e "${GREEN}║   Claude SEO Unified - VPS Deployment        ║${NC}"
-echo -e "${GREEN}║   Version 1.9.6                               ║${NC}"
+echo -e "${GREEN}║   Version 1.9.8                               ║${NC}"
 echo -e "${GREEN}╚═══════════════════════════════════════════════╝${NC}"
 echo ""
 
@@ -75,7 +75,7 @@ sudo -u seoapp mkdir -p logs output .seo-cache config/credentials
 
 echo -e "\n${GREEN}⚙️ Copying config templates...${NC}"
 sudo -u seoapp cp config/config.example.yaml config/config.yaml
-sudo -u seoapp cp config/.env.example .env
+sudo -u seoapp cp .env.example .env
 
 echo -e "\n${GREEN}🗄️ Setting up PostgreSQL...${NC}"
 DB_PASSWORD=$(openssl rand -hex 16)
@@ -148,7 +148,7 @@ ExecStart=/home/seoapp/claude-seo-unified/venv/bin/gunicorn \
     --timeout 300 \
     --access-logfile logs/access.log \
     --error-logfile logs/error.log \
-    api_server:app
+    scripts.api_server:app
 
 Restart=always
 RestartSec=10

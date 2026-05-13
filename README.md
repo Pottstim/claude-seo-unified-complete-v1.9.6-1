@@ -2,7 +2,9 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
-[![Version](https://img.shields.io/badge/version-1.9.7--unified-green.svg)](https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1)
+[![Version](https://img.shields.io/badge/version-1.9.8--unified-green.svg)](https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1)
+[![Tests](https://img.shields.io/badge/tests-passing-brightgreen.svg)](#)
+[![Production Ready](https://img.shields.io/badge/status-production--ready-blue.svg)](#)
 
 **Combined best-of-both from Claude SEO + Codex SEO**
 
