@@ -18,7 +18,7 @@ core:
 
 # Execution mode
 execution:
-  mode: "auto"  # auto | api | headless
+  mode: "auto"  # auto | api | headless | local
   prefer_api: true  # Use APIs over browser automation when possible
   parallel_agents: 9
   max_concurrent_requests: 15
@@ -26,19 +26,338 @@ execution:
   retry_attempts: 3
   retry_delay_seconds: 2
 
-# Browser automation (Playwright/Selenium)
-browser:
-  headless: true
-  browser_type: "chromium"  # chromium | firefox | webkit
-  viewport:
-    width: 1920
-    height: 1080
-  user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-  disable_images: false
-  disable_javascript: false
-  page_load_timeout: 60000
+# ============================================================
+# LLM PROVIDER CONFIGURATION (Bring Your Own Model)
+# ============================================================
+# Supports multiple providers - set active_provider to choose
+# All API keys should be set in .env file or environment variables
+
+llm:
+  active_provider: "anthropic"  # anthropic | openai | groq | cerebras | openrouter | ollama | together | custom
   
-# Scoring weights
+  providers:
+    # Anthropic Claude (default)
+    anthropic:
+      api_key: ${ANTHROPIC_API_KEY}
+      model: "claude-sonnet-4-20250514"
+      fallback_model: "claude-3-5-haiku-20241022"
+      max_tokens: 4096
+      
+    # OpenAI GPT
+    openai:
+      api_key: ${OPENAI_API_KEY}
+      model: "gpt-4o"
+      fallback_model: "gpt-4o-mini"
+      base_url: null  # Set for Azure/custom endpoints
+      
+    # Groq (fast inference)
+    groq:
+      api_key: ${GROQ_API_KEY}
+      model: "llama-3.3-70b-versatile"
+      fallback_model: "llama-3.1-8b-instant"
+      
+    # Cerebras (ultra-fast)
+    cerebras:
+      api_key: ${CEREBRAS_API_KEY}
+      model: "llama3.1-70b"
+      
+    # OpenRouter (aggregator - access to many models)
+    openrouter:
+      api_key: ${OPENROUTER_API_KEY}
+      model: "anthropic/claude-sonnet-4"
+      site_url: "https://github.com/Pottstim/claude-seo-unified"
+      app_name: "Claude SEO Unified"
+      
+    # Together AI
+    together:
+      api_key: ${TOGETHER_API_KEY}
+      model: "meta-llama/Llama-3-70b-chat-hf"
+      
+    # Ollama (local/self-hosted - no API key needed)
+    ollama:
+      base_url: "http://localhost:11434"
+      model: "llama3.2"
+      timeout: 120
+      
+    # Custom OpenAI-compatible endpoint
+    # Use for: LM Studio, vLLM, TGI, FastChat, etc.
+    custom:
+      base_url: ${LLM_BASE_URL}
+      api_key: ${LLM_API_KEY}  # Optional for local
+      model: "local-model"
+      provider_type: "openai_compatible"  # openai_compatible | anthropic_compatible
+
+# ============================================================
+# PERFORMANCE / CORE WEB VITALS PROVIDERS
+# ============================================================
+
+performance:
+  active_provider: "lighthouse"  # lighthouse | pagespeed_api | crux_api | webvitals_js
+  
+  providers:
+    # Lighthouse CLI (open source, no API key)
+    # Runs locally via Node.js
+    lighthouse:
+      enabled: true
+      chrome_flags: "--headless --no-sandbox"
+      categories:
+        - performance
+        - accessibility
+        - best-practices
+        - seo
+      throttling_method: "simulate"  # simulate | provided
+      
+    # Google PageSpeed Insights API
+    pagespeed_api:
+      enabled: false
+      api_key: ${GOOGLE_PAGESPEED_API_KEY}
+      categories:
+        - performance
+        - accessibility
+        - best-practices
+        - seo
+      strategies:
+        - mobile
+        - desktop
+        
+    # Chrome UX Report API (real user data)
+    crux_api:
+      enabled: false
+      api_key: ${GOOGLE_CRUX_API_KEY}
+      form_factors:
+        - PHONE
+        - DESKTOP
+        - TABLET
+        
+    # Web Vitals JS (client-side measurement)
+    # For sites you control - inject JS to collect RUM data
+    webvitals_js:
+      enabled: false
+      # No API key - uses client-side collection
+
+# ============================================================
+# SERP / KEYWORD RESEARCH PROVIDERS
+# ============================================================
+
+serp:
+  active_provider: null  # null | dataforseo | serpapi | valueserp | scraperapi | custom_scrape
+  
+  providers:
+    # DataForSEO (comprehensive, pay-per-use)
+    dataforseo:
+      enabled: false
+      username: ${DATAFORSEO_USERNAME}
+      password: ${DATAFORSEO_PASSWORD}
+      default_location: "United States"
+      default_language: "en"
+      
+    # SerpAPI (popular, good free tier)
+    serpapi:
+      enabled: false
+      api_key: ${SERPAPI_KEY}
+      engine: "google"
+      default_location: "United States"
+      
+    # ValueSERP (cost-effective)
+    valueserp:
+      enabled: false
+      api_key: ${VALUESERP_KEY}
+      
+    # ScraperAPI (general purpose, bypasses blocks)
+    scraperapi:
+      enabled: false
+      api_key: ${SCRAPERAPI_KEY}
+      
+    # Custom scraper (self-hosted, open source)
+    # Uses Playwright/Selenium with rotating proxies
+    custom_scrape:
+      enabled: false
+      proxy_list: ${PROXY_LIST}  # comma-separated or file path
+      rotate_user_agents: true
+      delay_range: [2, 5]  # seconds between requests
+
+# ============================================================
+# WEB CRAWLING / JS RENDERING PROVIDERS
+# ============================================================
+
+crawling:
+  active_provider: "playwright"  # playwright | selenium | firecrawl | browserless | scrapyp
+  
+  providers:
+    # Playwright (open source, local)
+    playwright:
+      enabled: true
+      browser: "chromium"  # chromium | firefox | webkit
+      headless: true
+      viewport:
+        width: 1920
+        height: 1080
+      user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+      disable_images: false
+      disable_javascript: false
+      
+    # Selenium (open source, local)
+    selenium:
+      enabled: false
+      browser: "chrome"  # chrome | firefox | edge
+      headless: true
+      driver_path: null  # Auto-detect if null
+      
+    # Firecrawl (managed service)
+    firecrawl:
+      enabled: false
+      api_key: ${FIRECRAWL_API_KEY}
+      api_base: "https://api.firecrawl.dev/v1"
+      
+    # Browserless (self-hosted or managed)
+    browserless:
+      enabled: false
+      api_key: ${BROWSERLESS_KEY}
+      api_base: ${BROWSERLESS_URL:-https://chrome.browserless.io}
+      
+    # Scrapy (Python framework, self-hosted)
+    scrappy:
+      enabled: false
+      settings_module: "scrapy_settings"
+      concurrent_requests: 16
+      download_delay: 0.5
+
+# ============================================================
+# IMAGE GENERATION PROVIDERS
+# ============================================================
+
+image_generation:
+  active_provider: null  # null | stable_diffusion | comfyui | dalle | replicate | huggingface | gemini | banana
+  
+  providers:
+    # Stable Diffusion WebUI (self-hosted, open source)
+    # Requires: AUTOMATIC1111 or ComfyUI running locally
+    stable_diffusion:
+      enabled: false
+      api_base: ${SD_WEBUI_URL:-http://localhost:7860}
+      model: "sd_xl_base_1.0"
+      steps: 30
+      width: 1024
+      height: 1024
+      
+    # ComfyUI (self-hosted, node-based)
+    comfyui:
+      enabled: false
+      api_base: ${COMFYUI_URL:-http://localhost:8188}
+      workflow: "default_workflow.json"
+      
+    # DALL-E (OpenAI)
+    dalle:
+      enabled: false
+      api_key: ${OPENAI_API_KEY}
+      model: "dall-e-3"
+      quality: "standard"  # standard | hd
+      size: "1024x1024"
+      
+    # Replicate (hosted open-source models)
+    replicate:
+      enabled: false
+      api_key: ${REPLICATE_API_KEY}
+      model: "stability-ai/sdxl"
+      
+    # HuggingFace Inference API
+    huggingface:
+      enabled: false
+      api_key: ${HUGGINGFACE_API_KEY}
+      model: "stabilityai/stable-diffusion-xl-base-1.0"
+      
+    # Google Gemini / Imagen
+    gemini:
+      enabled: false
+      api_key: ${GOOGLE_AI_API_KEY}
+      
+    # Banana.dev (hosted Stable Diffusion)
+    banana:
+      enabled: false
+      api_key: ${BANANA_API_KEY}
+      model: "SDXL"
+
+# ============================================================
+# SEARCH CONSOLE / ANALYTICS PROVIDERS
+# ============================================================
+
+analytics:
+  active_provider: null  # null | google_search_console | google_analytics | plausible | matomo | custom
+  
+  providers:
+    # Google Search Console
+    google_search_console:
+      enabled: false
+      auth_method: "oauth2"  # oauth2 | service_account
+      credentials_path: "config/credentials/gsc_credentials.json"
+      token_path: "config/credentials/gsc_token.json"
+      
+    # Google Analytics 4
+    google_analytics:
+      enabled: false
+      property_id: ${GA4_PROPERTY_ID}
+      credentials_path: "config/credentials/ga4_service_account.json"
+      
+    # Plausible (privacy-focused, self-hostable)
+    plausible:
+      enabled: false
+      api_key: ${PLAUSIBLE_API_KEY}
+      site_id: ${PLAUSIBLE_SITE_ID}
+      api_base: ${PLAUSIBLE_URL:-https://plausible.io}
+      
+    # Matomo (open source, self-hosted)
+    matomo:
+      enabled: false
+      api_base: ${MATOMO_URL}
+      site_id: ${MATOMO_SITE_ID}
+      auth_token: ${MATOMO_AUTH_TOKEN}
+      
+    # Custom analytics endpoint
+    custom:
+      enabled: false
+      api_base: ${ANALYTICS_API_URL}
+      api_key: ${ANALYTICS_API_KEY}
+      query_format: "json"  # json | graphql
+
+# ============================================================
+# BACKLINK / COMPETITOR ANALYSIS PROVIDERS
+# ============================================================
+
+backlinks:
+  active_provider: null  # null | dataforseo | ahrefs | moz | semrush | majestic
+  
+  providers:
+    # DataForSEO
+    dataforseo:
+      enabled: false
+      username: ${DATAFORSEO_USERNAME}
+      password: ${DATAFORSEO_PASSWORD}
+      
+    # Ahrefs API
+    ahrefs:
+      enabled: false
+      api_key: ${AHREFS_API_KEY}
+      
+    # Moz API
+    moz:
+      enabled: false
+      access_id: ${MOZ_ACCESS_ID}
+      secret_key: ${MOZ_SECRET_KEY}
+      
+    # SEMrush API
+    semrush:
+      enabled: false
+      api_key: ${SEMRUSH_API_KEY}
+      
+    # Majestic API
+    majestic:
+      enabled: false
+      api_key: ${MAJESTIC_API_KEY}
+
+# ============================================================
+# SCORING WEIGHTS
+# ============================================================
+
 scoring:
   technical: 22
   content: 23
@@ -48,7 +367,10 @@ scoring:
   ai_readiness: 10
   images: 5
 
-# Report generation
+# ============================================================
+# REPORT GENERATION
+# ============================================================
+
 reports:
   format: "pdf"  # pdf | html | json | markdown
   template: "default"
@@ -60,7 +382,10 @@ reports:
     primary_color: "#1a73e8"
     secondary_color: "#34a853"
 
-# Model Context Protocol (MCP)
+# ============================================================
+# MODEL CONTEXT PROTOCOL (MCP)
+# ============================================================
+
 mcp:
   enabled: true
   server_host: "localhost"
@@ -68,19 +393,12 @@ mcp:
   skills_dir: "skills"
   auto_register: true
 
-# Extensions (optional)
-extensions:
-  dataforseo: false
-  google_apis: false
-  firecrawl: false
-  banana_image: false
-  gemini_image: false
+# ============================================================
+# ENVIRONMENT
+# ============================================================
 
-# Environment
 environment:
-  python_version: "3.11"
+  python_version: "3.10"
   node_version: "20.10.0"
   required_tools:
     - playwright
-    - selenium
-    - weasyprint

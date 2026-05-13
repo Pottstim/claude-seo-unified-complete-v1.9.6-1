@@ -8,6 +8,46 @@
 
 This unified package merges the Claude Code MCP skills (21 workflows) with Codex SEO's advanced features (26 workflows, deterministic runners, premium reports) into a single installation for Claude Desktop.
 
+## ✨ What's New
+
+### Flexible Provider System
+
+**Bring your own APIs, use open-source alternatives, or run everything locally for free.**
+
+## 🔌 Provider System
+
+This package supports multiple providers for each category, including open-source and self-hosted options:
+
+| Category | Free/Open Source Options | Paid Cloud Options |
+|----------|-------------------------|-------------------|
+| **LLM** | Ollama, LM Studio, vLLM | Anthropic, OpenAI, Groq, Cerebras |
+| **Performance** | Lighthouse CLI (local) | PageSpeed API, CrUX API |
+| **SERP** | Custom scraper (Playwright) | SerpAPI, DataForSEO |
+| **Crawling** | Playwright, Selenium, Requests | Firecrawl, Browserless |
+| **Images** | Stable Diffusion (local) | DALL-E, Replicate |
+| **Analytics** | Plausible, Matomo (self-hosted) | Google Search Console |
+
+### Free Tier Setup
+
+Run everything for $0/month:
+
+```yaml
+# config.yaml
+llm:
+  active_provider: "ollama"  # Local LLM
+
+performance:
+  active_provider: "lighthouse"  # Local audits
+
+serp:
+  active_provider: "custom_scrape"  # Free SERP data
+
+crawling:
+  active_provider: "playwright"  # Local browser
+```
+
+See [Provider Alternatives Guide](docs/PROVIDERS.md) for full documentation.
+
 ## What's Included
 
 ### Core Features (from claude-seo)
@@ -109,6 +149,8 @@ After installation, use natural language or commands:
 | `/seo flow <stage>` | FLOW framework prompts |
 
 ## Extensions (Optional)
+
+Extensions add premium data sources. Alternatively, use the [Provider System](docs/PROVIDERS.md) to configure any API.
 
 ### DataForSEO
 Live SERP data, keyword research, backlinks, competitive intelligence.
