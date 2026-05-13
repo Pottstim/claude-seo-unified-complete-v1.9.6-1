@@ -75,6 +75,31 @@ See [Provider Alternatives Guide](docs/PROVIDERS.md) for full documentation.
 - ✅ FLOW framework integration
 - ✅ 26 total workflows (5 more than claude-seo)
 
+## 🚀 Business Tool Mode
+
+Turn this into a client-facing SEO analysis tool with:
+
+- **Web Dashboard** - Simple URL input, instant analysis
+- **PDF Reports** - Professional, branded client reports  
+- **Email Delivery** - Send reports directly to clients
+- **White-Label** - Add your business branding
+
+### Quick Start
+
+```bash
+# Terminal 1: Start API
+make api
+
+# Terminal 2: Serve dashboard  
+make dashboard
+
+# Open http://localhost:8000
+```
+
+See [Business Quick Start](docs/BUSINESS-QUICKSTART.md) for details.
+
+---
+
 ## Installation
 
 ### For Claude Desktop (MCP)

@@ -1,58 +1,39 @@
 # Makefile for claude-seo-unified
 
-.PHONY: help install test lint clean api docker-build docker-run
+.PHONY: help install test lint clean api dashboard docker-build docker-run
 
 help:
 	@echo "Claude SEO Unified - Available commands:"
 	@echo ""
-	@echo "  make install        Install dependencies"
-	@echo "  make test           Run tests"
-	@echo "  make test-integration Run integration tests"
-	@echo "  make lint           Run linters"
-	@echo "  make clean          Clean build artifacts"
-	@echo "  make api            Start API server locally"
-	@echo "  make docker-build   Build Docker image"
-	@echo "  make docker-run     Run Docker container"
-	@echo "  make audit URL=...  Run SEO audit"
+	@echo "  make install       Install dependencies"
+	@echo "  make test          Run tests"
+	@echo "  make lint          Run linter"
+	@echo "  make api           Start REST API server"
+	@echo "  make dashboard     Serve the business dashboard"
+	@echo "  make analyze URL=  Analyze a URL (CLI)"
+	@echo "  make report URL=   Generate PDF report for URL"
+	@echo "  make docker-build  Build Docker image"
+	@echo "  make docker-run    Run Docker container"
+	@echo "  make clean         Clean cache and output files"
 	@echo ""
 
 install:
 	pip install -r requirements.txt
-	playwright install chromium
-
-install-core:
-	pip install -r requirements-core.txt
-
-install-dev:
-	pip install -r requirements.txt
-	pip install -r requirements-optional.txt
-	pre-commit install
+	playwright install
 
 test:
-	pytest tests/test_workflow.py -v
-
-test-integration:
-	pytest tests/test_integration.py -v -m integration
-
-test-all:
 	pytest tests/ -v
 
 lint:
-	black --check scripts/ tests/
-	ruff scripts/ tests/
-	mypy scripts/
-
-format:
-	black scripts/ tests/
-
-clean:
-	rm -rf __pycache__ .pytest_cache .mypy_cache .ruff_cache
-	rm -rf *.egg-info build dist
-	rm -rf .seo-cache/*
-	rm -rf screenshots/*
+	pylint scripts/ --ignore-patterns="providers"
 
 api:
 	python scripts/api_server.py
+
+dashboard:
+	@echo "Serving dashboard at http://localhost:8000"
+	@echo "Press Ctrl+C to stop"
+	cd dashboard && python -m http.server 8000
 
 docker-build:
 	docker build -f deploy/Dockerfile -t claude-seo-unified:latest .

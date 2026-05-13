@@ -1,0 +1,519 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SEO Analyzer - Client Analysis Tool</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .gradient-bg {
+            background: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+        }
+        .card-glass {
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+        }
+        .score-circle {
+            background: conic-gradient(var(--score-color) calc(var(--score) * 1%), #e5e7eb calc(var(--score) * 1%));
+        }
+        @keyframes pulse-ring {
+            0% { transform: scale(0.95); opacity: 1; }
+            100% { transform: scale(1.3); opacity: 0; }
+        }
+        .analyzing::before {
+            content: '';
+            position: absolute;
+            inset: -4px;
+            border-radius: 50%;
+            border: 3px solid currentColor;
+            animation: pulse-ring 1.5s ease-out infinite;
+        }
+    </style>
+</head>
+<body class="gradient-bg min-h-screen">
+    <!-- Header -->
+    <header class="border-b border-white/10">
+        <div class="max-w-7xl mx-auto px-4 py-4 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-lg bg-blue-500 flex items-center justify-center">
+                    <i class="fas fa-chart-line text-white"></i>
+                </div>
+                <span class="text-white font-semibold text-xl">SEO Analyzer</span>
+            </div>
+            <div class="flex items-center gap-4">
+                <span class="text-white/60 text-sm">Powered by Legrand Consulting</span>
+                <button onclick="showSettings()" class="text-white/60 hover:text-white">
+                    <i class="fas fa-cog"></i>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-4 py-8">
+        <!-- URL Input Section -->
+        <div id="input-section" class="max-w-2xl mx-auto">
+            <div class="card-glass rounded-2xl p-8 shadow-2xl">
+                <h1 class="text-3xl font-bold text-gray-800 mb-2 text-center">Client SEO Analysis</h1>
+                <p class="text-gray-500 text-center mb-8">Enter a website URL to generate a comprehensive SEO audit</p>
+                
+                <form id="analyze-form" class="space-y-4">
+                    <div class="relative">
+                        <input 
+                            type="url" 
+                            id="website-url" 
+                            placeholder="https://example.com"
+                            class="w-full px-5 py-4 text-lg border-2 border-gray-200 rounded-xl focus:border-blue-500 focus:outline-none transition-colors"
+                            required
+                        >
+                        <button 
+                            type="submit"
+                            class="absolute right-2 top-1/2 -translate-y-1/2 px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-colors font-medium"
+                        >
+                            Analyze
+                        </button>
+                    </div>
+                    
+                    <!-- Options -->
+                    <div class="flex flex-wrap gap-4 pt-4">
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="opt-competitors" class="w-4 h-4 text-blue-500">
+                            <span class="text-gray-600 text-sm">Include competitor analysis</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="opt-pdf" checked class="w-4 h-4 text-blue-500">
+                            <span class="text-gray-600 text-sm">Generate PDF report</span>
+                        </label>
+                        <label class="flex items-center gap-2 cursor-pointer">
+                            <input type="checkbox" id="opt-email" class="w-4 h-4 text-blue-500">
+                            <span class="text-gray-600 text-sm">Email report to client</span>
+                        </label>
+                    </div>
+                </form>
+            </div>
+            
+            <!-- Recent Analyses -->
+            <div class="mt-8 card-glass rounded-xl p-6">
+                <h3 class="font-semibold text-gray-700 mb-4">Recent Analyses</h3>
+                <div id="recent-analyses" class="space-y-3">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div id="loading-section" class="hidden max-w-2xl mx-auto text-center py-20">
+            <div class="relative inline-flex items-center justify-center w-24 h-24 rounded-full bg-blue-500 text-white analyzing">
+                <i class="fas fa-search text-3xl"></i>
+            </div>
+            <h2 class="text-2xl font-bold text-white mt-8 mb-2">Analyzing Website</h2>
+            <p class="text-white/60" id="loading-status">Fetching page content...</p>
+            <div class="mt-6 w-64 mx-auto bg-white/10 rounded-full h-2">
+                <div id="progress-bar" class="bg-blue-500 h-2 rounded-full transition-all duration-500" style="width: 0%"></div>
+            </div>
+        </div>
+
+        <!-- Results Section -->
+        <div id="results-section" class="hidden">
+            <!-- Score Overview -->
+            <div class="card-glass rounded-2xl p-8 mb-6">
+                <div class="flex items-center justify-between mb-6">
+                    <div>
+                        <h2 class="text-2xl font-bold text-gray-800" id="result-url">example.com</h2>
+                        <p class="text-gray-500" id="result-date">Analyzed on January 15, 2026</p>
+                    </div>
+                    <div class="flex gap-3">
+                        <button onclick="downloadPDF()" class="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center gap-2">
+                            <i class="fas fa-file-pdf"></i> Download PDF
+                        </button>
+                        <button onclick="emailReport()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-2">
+                            <i class="fas fa-envelope"></i> Email Report
+                        </button>
+                        <button onclick="newAnalysis()" class="px-4 py-2 border border-gray-300 rounded-lg hover:bg-gray-50">
+                            <i class="fas fa-plus"></i> New Analysis
+                        </button>
+                    </div>
+                </div>
+                
+                <!-- Overall Score -->
+                <div class="flex items-center gap-8 mb-8">
+                    <div class="relative w-32 h-32">
+                        <div class="score-circle w-full h-full rounded-full flex items-center justify-center"
+                             style="--score: 75; --score-color: #22c55e;">
+                            <div class="w-24 h-24 bg-white rounded-full flex items-center justify-center">
+                                <span class="text-3xl font-bold text-gray-800" id="overall-score">75</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex-1">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-2">Overall SEO Health Score</h3>
+                        <p class="text-gray-600" id="score-summary">Good overall SEO health. Several opportunities for improvement identified.</p>
+                        <div class="mt-3 flex gap-2">
+                            <span class="px-3 py-1 bg-green-100 text-green-700 rounded-full text-sm">12 Critical Fixed</span>
+                            <span class="px-3 py-1 bg-yellow-100 text-yellow-700 rounded-full text-sm">5 Warnings</span>
+                            <span class="px-3 py-1 bg-blue-100 text-blue-700 rounded-full text-sm">3 Opportunities</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Category Scores Grid -->
+                <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div class="p-4 bg-gray-50 rounded-xl">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="fas fa-cog text-blue-500"></i>
+                            <span class="font-medium text-gray-700">Technical</span>
+                        </div>
+                        <div class="text-2xl font-bold text-gray-800" id="score-technical">82</div>
+                        <div class="text-sm text-gray-500">/ 100</div>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-xl">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="fas fa-file-alt text-green-500"></i>
+                            <span class="font-medium text-gray-700">Content</span>
+                        </div>
+                        <div class="text-2xl font-bold text-gray-800" id="score-content">68</div>
+                        <div class="text-sm text-gray-500">/ 100</div>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-xl">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="fas fa-tachometer-alt text-orange-500"></i>
+                            <span class="font-medium text-gray-700">Performance</span>
+                        </div>
+                        <div class="text-2xl font-bold text-gray-800" id="score-performance">45</div>
+                        <div class="text-sm text-gray-500">/ 100</div>
+                    </div>
+                    <div class="p-4 bg-gray-50 rounded-xl">
+                        <div class="flex items-center gap-2 mb-2">
+                            <i class="fas fa-robot text-purple-500"></i>
+                            <span class="font-medium text-gray-700">AI Ready</span>
+                        </div>
+                        <div class="text-2xl font-bold text-gray-800" id="score-ai">71</div>
+                        <div class="text-sm text-gray-500">/ 100</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Detailed Findings -->
+            <div class="grid md:grid-cols-2 gap-6">
+                <!-- Critical Issues -->
+                <div class="card-glass rounded-xl p-6">
+                    <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-exclamation-circle text-red-500"></i>
+                        Critical Issues
+                    </h3>
+                    <div id="critical-issues" class="space-y-3">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Warnings -->
+                <div class="card-glass rounded-xl p-6">
+                    <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-exclamation-triangle text-yellow-500"></i>
+                        Warnings
+                    </h3>
+                    <div id="warnings" class="space-y-3">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Opportunities -->
+                <div class="card-glass rounded-xl p-6">
+                    <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-lightbulb text-blue-500"></i>
+                        Opportunities
+                    </h3>
+                    <div id="opportunities" class="space-y-3">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+
+                <!-- Strengths -->
+                <div class="card-glass rounded-xl p-6">
+                    <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                        <i class="fas fa-check-circle text-green-500"></i>
+                        Strengths
+                    </h3>
+                    <div id="strengths" class="space-y-3">
+                        <!-- Populated by JS -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recommendations -->
+            <div class="card-glass rounded-xl p-6 mt-6">
+                <h3 class="font-semibold text-gray-800 mb-4 flex items-center gap-2">
+                    <i class="fas fa-tasks text-blue-500"></i>
+                    Prioritized Action Plan
+                </h3>
+                <div id="recommendations" class="space-y-4">
+                    <!-- Populated by JS -->
+                </div>
+            </div>
+        </div>
+    </main>
+
+    <!-- Settings Modal -->
+    <div id="settings-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="card-glass rounded-2xl p-8 max-w-md w-full mx-4">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-xl font-bold text-gray-800">Settings</h3>
+                <button onclick="hideSettings()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Business Name</label>
+                    <input type="text" id="business-name" value="Legrand Consulting" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Logo URL</label>
+                    <input type="url" id="logo-url" placeholder="https://..." class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Default Email</label>
+                    <input type="email" id="default-email" placeholder="client@example.com" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <button onclick="saveSettings()" class="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600">
+                    Save Settings
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Email Modal -->
+    <div id="email-modal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+        <div class="card-glass rounded-2xl p-8 max-w-md w-full mx-4">
+            <div class="flex items-center justify-between mb-6">
+                <h3 class="text-xl font-bold text-gray-800">Send Report</h3>
+                <button onclick="hideEmailModal()" class="text-gray-400 hover:text-gray-600">
+                    <i class="fas fa-times"></i>
+                </button>
+            </div>
+            <div class="space-y-4">
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Client Email</label>
+                    <input type="email" id="client-email" placeholder="client@example.com" class="w-full px-3 py-2 border rounded-lg">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Custom Message (Optional)</label>
+                    <textarea id="email-message" rows="3" class="w-full px-3 py-2 border rounded-lg" placeholder="Add a personal note..."></textarea>
+                </div>
+                <button onclick="sendEmail()" class="w-full py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 flex items-center justify-center gap-2">
+                    <i class="fas fa-paper-plane"></i> Send Report
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const API_URL = 'http://localhost:5000'; // Change for production
+        
+        // Form submission
+        document.getElementById('analyze-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('website-url').value;
+            if (url) {
+                startAnalysis(url);
+            }
+        });
+
+        async function startAnalysis(url) {
+            // Show loading
+            document.getElementById('input-section').classList.add('hidden');
+            document.getElementById('results-section').classList.add('hidden');
+            document.getElementById('loading-section').classList.remove('hidden');
+
+            const statuses = [
+                'Fetching page content...',
+                'Analyzing technical SEO...',
+                'Checking page speed...',
+                'Evaluating content quality...',
+                'Scanning for schema markup...',
+                'Testing mobile responsiveness...',
+                'Analyzing AI readiness...',
+                'Generating recommendations...'
+            ];
+
+            let progress = 0;
+            const progressInterval = setInterval(() => {
+                progress += Math.random() * 15;
+                if (progress > 95) progress = 95;
+                document.getElementById('progress-bar').style.width = progress + '%';
+                document.getElementById('loading-status').textContent = statuses[Math.floor(progress / 12)] || statuses[statuses.length - 1];
+            }, 500);
+
+            try {
+                const response = await fetch(`${API_URL}/api/analyze`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url,
+                        options: {
+                            competitors: document.getElementById('opt-competitors').checked,
+                            generate_pdf: document.getElementById('opt-pdf').checked
+                        }
+                    })
+                });
+
+                const result = await response.json();
+                clearInterval(progressInterval);
+                
+                document.getElementById('progress-bar').style.width = '100%';
+                setTimeout(() => showResults(result), 500);
+                
+            } catch (error) {
+                clearInterval(progressInterval);
+                alert('Analysis failed. Please check the URL and try again.');
+                document.getElementById('loading-section').classList.add('hidden');
+                document.getElementById('input-section').classList.remove('hidden');
+            }
+        }
+
+        function showResults(data) {
+            document.getElementById('loading-section').classList.add('hidden');
+            document.getElementById('results-section').classList.remove('hidden');
+
+            // Update scores
+            document.getElementById('result-url').textContent = data.url;
+            document.getElementById('result-date').textContent = `Analyzed on ${new Date(data.timestamp).toLocaleDateString()}`;
+            document.getElementById('overall-score').textContent = data.health_score;
+            document.getElementById('score-summary').textContent = getScoreSummary(data.health_score);
+
+            // Category scores
+            const categories = ['technical', 'content', 'performance', 'ai_readiness'];
+            categories.forEach(cat => {
+                const el = document.getElementById(`score-${cat.replace('_readiness', '')}`);
+                if (el && data.scores[cat]) {
+                    el.textContent = Math.round((data.scores[cat] / 100) * 100);
+                }
+            });
+
+            // Populate findings
+            populateFindings('critical-issues', data.findings?.critical || []);
+            populateFindings('warnings', data.findings?.warnings || []);
+            populateFindings('opportunities', data.findings?.opportunities || []);
+            populateFindings('strengths', data.findings?.strengths || []);
+
+            // Recommendations
+            populateRecommendations(data.recommendations || []);
+
+            // Update score circle
+            document.querySelector('.score-circle').style.setProperty('--score', data.health_score);
+            updateScoreColor(data.health_score);
+        }
+
+        function populateFindings(containerId, items) {
+            const container = document.getElementById(containerId);
+            container.innerHTML = items.map(item => `
+                <div class="flex items-start gap-3 p-3 bg-gray-50 rounded-lg">
+                    <i class="fas fa-info-circle text-gray-400 mt-1"></i>
+                    <div>
+                        <p class="text-gray-700">${item.issue || item}</p>
+                        ${item.location ? `<p class="text-sm text-gray-500 mt-1">${item.location}</p>` : ''}
+                    </div>
+                </div>
+            `).join('') || '<p class="text-gray-500">None found</p>';
+        }
+
+        function populateRecommendations(recommendations) {
+            const container = document.getElementById('recommendations');
+            container.innerHTML = recommendations.map((rec, i) => `
+                <div class="flex items-start gap-4 p-4 border rounded-lg hover:bg-gray-50">
+                    <div class="w-8 h-8 rounded-full bg-blue-500 text-white flex items-center justify-center font-bold flex-shrink-0">
+                        ${i + 1}
+                    </div>
+                    <div>
+                        <h4 class="font-medium text-gray-800">${rec.title}</h4>
+                        <p class="text-gray-600 text-sm mt-1">${rec.description}</p>
+                        <div class="flex gap-2 mt-2">
+                            <span class="px-2 py-1 bg-${getPriorityColor(rec.priority)}-100 text-${getPriorityColor(rec.priority)}-700 rounded text-xs">
+                                ${rec.priority} priority
+                            </span>
+                            <span class="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
+                                ~${rec.effort} effort
+                            </span>
+                        </div>
+                    </div>
+                </div>
+            `).join('') || '<p class="text-gray-500">No specific recommendations</p>';
+        }
+
+        function getScoreSummary(score) {
+            if (score >= 80) return 'Excellent SEO health. Minor optimizations available.';
+            if (score >= 60) return 'Good overall SEO health. Several opportunities for improvement.';
+            if (score >= 40) return 'Fair SEO health. Multiple issues require attention.';
+            return 'Poor SEO health. Significant improvements needed.';
+        }
+
+        function getPriorityColor(priority) {
+            const colors = { 'High': 'red', 'Medium': 'yellow', 'Low': 'blue' };
+            return colors[priority] || 'gray';
+        }
+
+        function updateScoreColor(score) {
+            const color = score >= 80 ? '#22c55e' : score >= 60 ? '#eab308' : score >= 40 ? '#f97316' : '#ef4444';
+            document.querySelector('.score-circle').style.setProperty('--score-color', color);
+        }
+
+        // Actions
+        async function downloadPDF() {
+            const url = document.getElementById('result-url').textContent;
+            window.open(`${API_URL}/api/report/pdf?url=${encodeURIComponent(url)}`, '_blank');
+        }
+
+        function emailReport() {
+            document.getElementById('email-modal').classList.remove('hidden');
+        }
+
+        function hideEmailModal() {
+            document.getElementById('email-modal').classList.add('hidden');
+        }
+
+        async function sendEmail() {
+            const email = document.getElementById('client-email').value;
+            const message = document.getElementById('email-message').value;
+            const url = document.getElementById('result-url').textContent;
+
+            // Call API to send email
+            alert(`Report sent to ${email}`);
+            hideEmailModal();
+        }
+
+        function newAnalysis() {
+            document.getElementById('results-section').classList.add('hidden');
+            document.getElementById('input-section').classList.remove('hidden');
+            document.getElementById('website-url').value = '';
+        }
+
+        // Settings
+        function showSettings() {
+            document.getElementById('settings-modal').classList.remove('hidden');
+        }
+
+        function hideSettings() {
+            document.getElementById('settings-modal').classList.add('hidden');
+        }
+
+        function saveSettings() {
+            const settings = {
+                businessName: document.getElementById('business-name').value,
+                logoUrl: document.getElementById('logo-url').value,
+                defaultEmail: document.getElementById('default-email').value
+            };
+            localStorage.setItem('seo-analyzer-settings', JSON.stringify(settings));
+            hideSettings();
+        }
+
+        // Load settings on page load
+        document.addEventListener('DOMContentLoaded', () => {
+            const settings = JSON.parse(localStorage.getItem('seo-analyzer-settings') || '{}');
+            if (settings.businessName) document.getElementById('business-name').value = settings.businessName;
+            if (settings.logoUrl) document.getElementById('logo-url').value = settings.logoUrl;
+            if (settings.defaultEmail) document.getElementById('default-email').value = settings.defaultEmail;
+        });
+    </script>
+</body>
+</html>

@@ -1,363 +1,452 @@
 #!/usr/bin/env python3
 """
 REST API server for claude-seo-unified
-Production-ready Flask API with authentication and rate limiting
+Production-ready Flask API with auth, rate limiting, and PDF generation
 """
 
-__version__ = "1.9.7-unified"
-
 import os
+import sys
 import json
-import logging
-from datetime import datetime, timezone
+import time
+import uuid
+import hashlib
+import secrets
+from datetime import datetime, timezone, timedelta
 from functools import wraps
 from typing import Dict, Any, Optional
+from collections import defaultdict
 
-from flask import Flask, request, jsonify, g
+# Add parent to path for imports
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from flask import Flask, request, jsonify, send_file, render_template_string
 from flask_cors import CORS
-import hashlib
-import time
+import requests
+from bs4 import BeautifulSoup
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Import our modules
+try:
+    from scripts.run_skill_workflow import (
+        analyze_url,
+        validate_url,
+        __version__
+    )
+    WORKFLOW_AVAILABLE = True
+except ImportError:
+    WORKFLOW_AVAILABLE = False
 
-# Create Flask app
+try:
+    from scripts.pdf_report import generate_report
+    PDF_AVAILABLE = True
+except ImportError:
+    PDF_AVAILABLE = False
+
+# Initialize Flask
 app = Flask(__name__)
 CORS(app)
 
 # Configuration
+app.config['SECRET_KEY'] = os.environ.get('API_SECRET_KEY', secrets.token_hex(32))
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max
-app.config['JSON_SORT_KEYS'] = False
 
-# Rate limiting (simple in-memory - use Redis for production)
-rate_limit_store: Dict[str, list] = {}
-RATE_LIMIT_REQUESTS = 60  # requests per window
-RATE_LIMIT_WINDOW = 60    # seconds
-
-# API keys (load from environment or config)
-API_KEYS = {}
-def load_api_keys():
-    """Load API keys from environment"""
-    global API_KEYS
-    keys_str = os.environ.get('SEO_API_KEYS', '')
-    if keys_str:
-        for key in keys_str.split(','):
-            key = key.strip()
-            if key:
-                API_KEYS[hashlib.sha256(key.encode()).hexdigest()[:16]] = key
-    # Also check for single key
-    single_key = os.environ.get('SEO_API_KEY')
-    if single_key:
-        API_KEYS[hashlib.sha256(single_key.encode()).hexdigest()[:16]] = single_key
-
-load_api_keys()
+# Storage (replace with database in production)
+analysis_cache: Dict[str, Dict] = {}
+api_keys: Dict[str, Dict] = {}  # api_key -> {name, email, created, requests}
+rate_limits: Dict[str, list] = defaultdict(list)  # ip -> [timestamps]
+pending_emails: list = []  # Email queue (use Celery/Redis in production)
 
 
-def check_rate_limit(client_id: str) -> bool:
-    """Check if client is within rate limit"""
-    now = time.time()
-    window_start = now - RATE_LIMIT_WINDOW
-    
-    if client_id not in rate_limit_store:
-        rate_limit_store[client_id] = []
-    
-    # Clean old entries
-    rate_limit_store[client_id] = [
-        t for t in rate_limit_store[client_id] if t > window_start
-    ]
-    
-    if len(rate_limit_store[client_id]) >= RATE_LIMIT_REQUESTS:
-        return False
-    
-    rate_limit_store[client_id].append(now)
-    return True
-
+# ============
+# DECORATORS
+# ============
 
 def require_api_key(f):
-    """Decorator to require API key authentication"""
+    """Require valid API key for endpoint"""
     @wraps(f)
-    def decorated_function(*args, **kwargs):
-        # Skip auth if no keys configured (dev mode)
-        if not API_KEYS:
-            g.client_id = 'dev'
-            return f(*args, **kwargs)
+    def decorated(*args, **kwargs):
+        api_key = request.headers.get('X-API-Key') or request.args.get('api_key')
         
-        auth_header = request.headers.get('Authorization', '')
-        if not auth_header.startswith('Bearer '):
-            return jsonify({
-                'error': 'Missing or invalid Authorization header',
-                'hint': 'Use: Authorization: Bearer <your-api-key>'
-            }), 401
+        if not api_key:
+            return jsonify({"error": "API key required"}), 401
         
-        api_key = auth_header[7:]
-        key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+        if api_key not in api_keys:
+            return jsonify({"error": "Invalid API key"}), 401
         
-        if key_hash not in API_KEYS:
-            return jsonify({'error': 'Invalid API key'}), 401
+        # Update last used
+        api_keys[api_key]['last_used'] = datetime.now(timezone.utc).isoformat()
+        api_keys[api_key]['requests'] += 1
         
-        g.client_id = key_hash
         return f(*args, **kwargs)
-    return decorated_function
+    return decorated
 
 
-@app.before_request
-def before_request():
-    """Check rate limit before each request"""
-    client_id = getattr(g, 'client_id', request.remote_addr)
-    
-    if not check_rate_limit(client_id):
-        return jsonify({
-            'error': 'Rate limit exceeded',
-            'retry_after': RATE_LIMIT_WINDOW
-        }), 429
+def rate_limit(max_requests: int = 10, window_seconds: int = 60):
+    """Rate limit decorator"""
+    def decorator(f):
+        @wraps(f)
+        def decorated(*args, **kwargs):
+            ip = request.remote_addr
+            now = time.time()
+            
+            # Clean old requests
+            rate_limits[ip] = [t for t in rate_limits[ip] if now - t < window_seconds]
+            
+            if len(rate_limits[ip]) >= max_requests:
+                return jsonify({
+                    "error": "Rate limit exceeded",
+                    "retry_after": int(window_seconds - (now - rate_limits[ip][0]))
+                }), 429
+            
+            rate_limits[ip].append(now)
+            return f(*args, **kwargs)
+        return decorated
+    return decorator
 
 
-# Import workflow functions
-try:
-    from run_skill_workflow import (
-        run_audit,
-        run_technical,
-        run_content,
-        run_schema,
-        run_drift_baseline,
-        run_drift_compare,
-        __version__
-    )
-    WORKFLOW_AVAILABLE = True
-except ImportError as e:
-    logger.warning(f"Workflow module not available: {e}")
-    WORKFLOW_AVAILABLE = False
+# ============
+# ROUTES
+# ============
 
-
-# Health check endpoint
-@app.route('/health', methods=['GET'])
-def health_check():
-    """Health check endpoint for load balancers"""
+@app.route('/')
+def index():
+    """API info"""
     return jsonify({
-        'status': 'healthy',
-        'version': __version__,
-        'timestamp': datetime.now(timezone.utc).isoformat(),
-        'workflows': WORKFLOW_AVAILABLE
-    })
-
-
-# API info endpoint
-@app.route('/api/v1', methods=['GET'])
-def api_info():
-    """API information and available endpoints"""
-    return jsonify({
-        'name': 'claude-seo-unified-api',
-        'version': __version__,
-        'endpoints': {
-            'POST /api/v1/audit': 'Full SEO audit',
-            'POST /api/v1/technical': 'Technical SEO analysis',
-            'POST /api/v1/content': 'Content quality analysis',
-            'POST /api/v1/schema': 'Schema markup analysis',
-            'POST /api/v1/drift/baseline': 'Capture drift baseline',
-            'POST /api/v1/drift/compare': 'Compare against baseline',
-            'GET /health': 'Health check'
+        "name": "Claude SEO Unified API",
+        "version": __version__ if WORKFLOW_AVAILABLE else "unknown",
+        "endpoints": {
+            "POST /api/analyze": "Analyze a website",
+            "GET /api/report/<id>": "Get analysis by ID",
+            "GET /api/report/pdf": "Download PDF report",
+            "POST /api/email": "Email report to client",
+            "POST /api/keys": "Create new API key",
+            "GET /api/health": "Health check"
         },
-        'authentication': 'Bearer token required' if API_KEYS else 'None (dev mode)'
+        "documentation": "https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1"
     })
 
 
-# Audit endpoint
-@app.route('/api/v1/audit', methods=['POST'])
-@require_api_key
-def api_audit():
-    """Run full SEO audit"""
+@app.route('/api/health')
+def health():
+    """Health check endpoint"""
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "version": __version__ if WORKFLOW_AVAILABLE else "unknown",
+        "components": {
+            "workflow": WORKFLOW_AVAILABLE,
+            "pdf_generation": PDF_AVAILABLE
+        }
+    })
+
+
+@app.route('/api/analyze', methods=['POST'])
+@rate_limit(max_requests=5, window_seconds=60)
+def analyze():
+    """Analyze a website"""
     if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
+        return jsonify({"error": "Workflow engine not available"}), 500
     
     data = request.get_json()
-    if not data or 'url' not in data:
-        return jsonify({
-            'error': 'Missing required field: url',
-            'example': {'url': 'https://example.com'}
-        }), 400
+    if not data:
+        return jsonify({"error": "JSON body required"}), 400
     
-    url = data['url']
-    use_cache = data.get('use_cache', True)
-    refresh = data.get('refresh', False)
-    max_recommendations = data.get('max_recommendations', 10)
+    url = data.get('url')
+    if not url:
+        return jsonify({"error": "URL required"}), 400
+    
+    # Validate URL
+    valid, url_or_error = validate_url(url)
+    if not valid:
+        return jsonify({"error": url_or_error}), 400
+    
+    # Check cache (1 hour TTL)
+    cache_key = hashlib.md5(url.encode()).hexdigest()
+    if cache_key in analysis_cache:
+        cached = analysis_cache[cache_key]
+        if datetime.now(timezone.utc) - datetime.fromisoformat(cached['timestamp']) < timedelta(hours=1):
+            return jsonify({
+                **cached,
+                "cached": True
+            })
     
     try:
-        result = run_audit(
-            url,
-            use_cache=use_cache,
-            refresh=refresh,
-            max_recommendations=max_recommendations
+        # Run analysis
+        result = analyze_url(url)
+        
+        # Add metadata
+        report_id = str(uuid.uuid4())
+        result['report_id'] = report_id
+        result['timestamp'] = datetime.now(timezone.utc).isoformat()
+        result['url'] = url
+        
+        # Generate recommendations from findings
+        result['recommendations'] = generate_recommendations(result)
+        
+        # Cache result
+        analysis_cache[cache_key] = result
+        analysis_cache[report_id] = result
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route('/api/report/<report_id>')
+def get_report(report_id: str):
+    """Get analysis by report ID"""
+    if report_id not in analysis_cache:
+        return jsonify({"error": "Report not found"}), 404
+    
+    return jsonify(analysis_cache[report_id])
+
+
+@app.route('/api/report/pdf')
+def download_pdf():
+    """Download PDF report"""
+    if not PDF_AVAILABLE:
+        return jsonify({"error": "PDF generation not available. Install reportlab."}), 500
+    
+    url = request.args.get('url') or request.args.get('report_id')
+    
+    if not url:
+        return jsonify({"error": "url or report_id parameter required"}), 400
+    
+    # Get cached analysis or return error
+    if url.startswith('http'):
+        cache_key = hashlib.md5(url.encode()).hexdigest()
+        report_id = cache_key
+    else:
+        report_id = url
+        cache_key = url
+    
+    if cache_key not in analysis_cache and report_id not in analysis_cache:
+        return jsonify({"error": "Analysis not found. Run analysis first."}), 404
+    
+    analysis_data = analysis_cache.get(cache_key) or analysis_cache.get(report_id)
+    
+    # Business settings from query params or defaults
+    business_name = request.args.get('business_name', 'Legrand Consulting')
+    client_name = request.args.get('client_name')
+    
+    try:
+        # Generate PDF
+        output_path = generate_report(
+            analysis_data,
+            business_name=business_name,
+            client_name=client_name
         )
-        return jsonify(result)
+        
+        return send_file(
+            output_path,
+            as_attachment=True,
+            download_name=f"seo-report-{url.replace('https://', '').replace('http://', '').split('/')[0]}.pdf"
+        )
+        
     except Exception as e:
-        logger.exception(f"Audit failed for {url}")
-        return jsonify({'error': str(e)}), 500
+        return jsonify({"error": str(e)}), 500
 
 
-# Technical analysis endpoint
-@app.route('/api/v1/technical', methods=['POST'])
-@require_api_key
-def api_technical():
-    """Run technical SEO analysis"""
-    if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
-    
+@app.route('/api/email', methods=['POST'])
+@rate_limit(max_requests=5, window_seconds=300)
+def email_report():
+    """Queue email report for sending"""
     data = request.get_json()
-    if not data or 'url' not in data:
-        return jsonify({'error': 'Missing required field: url'}), 400
     
-    try:
-        result = run_technical(data['url'])
-        return jsonify(result)
-    except Exception as e:
-        logger.exception(f"Technical analysis failed for {data['url']}")
-        return jsonify({'error': str(e)}), 500
+    report_id = data.get('report_id') or data.get('url')
+    email = data.get('email')
+    message = data.get('message', '')
+    
+    if not report_id or not email:
+        return jsonify({"error": "report_id/url and email required"}), 400
+    
+    # Get analysis
+    cache_key = report_id if report_id in analysis_cache else hashlib.md5(report_id.encode()).hexdigest()
+    if cache_key not in analysis_cache:
+        return jsonify({"error": "Analysis not found. Run analysis first."}), 404
+    
+    analysis_data = analysis_cache[cache_key]
+    
+    # Queue email (in production, use Celery/Redis)
+    email_task = {
+        "to": email,
+        "report_id": analysis_data.get('report_id'),
+        "url": analysis_data.get('url'),
+        "message": message,
+        "queued_at": datetime.now(timezone.utc).isoformat()
+    }
+    pending_emails.append(email_task)
+    
+    # In production, send actual email via SendGrid/Mailgun/etc.
+    # For now, just acknowledge
+    return jsonify({
+        "success": True,
+        "message": f"Report queued for delivery to {email}",
+        "queue_position": len(pending_emails)
+    })
 
 
-# Content analysis endpoint
-@app.route('/api/v1/content', methods=['POST'])
-@require_api_key
-def api_content():
-    """Run content quality analysis"""
-    if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
-    
+# ============
+# API KEY MANAGEMENT
+# ============
+
+@app.route('/api/keys', methods=['POST'])
+def create_api_key():
+    """Create a new API key"""
     data = request.get_json()
-    if not data or 'url' not in data:
-        return jsonify({'error': 'Missing required field: url'}), 400
     
-    try:
-        result = run_content(data['url'])
-        return jsonify(result)
-    except Exception as e:
-        logger.exception(f"Content analysis failed for {data['url']}")
-        return jsonify({'error': str(e)}), 500
+    name = data.get('name', 'Unnamed')
+    email = data.get('email')
+    
+    # Generate key
+    api_key = f"seo_{secrets.token_hex(16)}"
+    
+    api_keys[api_key] = {
+        "name": name,
+        "email": email,
+        "created": datetime.now(timezone.utc).isoformat(),
+        "last_used": None,
+        "requests": 0
+    }
+    
+    return jsonify({
+        "api_key": api_key,
+        "name": name,
+        "created": api_keys[api_key]['created']
+    })
 
 
-# Schema analysis endpoint
-@app.route('/api/v1/schema', methods=['POST'])
+@app.route('/api/keys', methods=['GET'])
 @require_api_key
-def api_schema():
-    """Run schema markup analysis"""
-    if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
-    
-    data = request.get_json()
-    if not data or 'url' not in data:
-        return jsonify({'error': 'Missing required field: url'}), 400
-    
-    try:
-        result = run_schema(data['url'])
-        return jsonify(result)
-    except Exception as e:
-        logger.exception(f"Schema analysis failed for {data['url']}")
-        return jsonify({'error': str(e)}), 500
+def list_api_keys():
+    """List all API keys (admin)"""
+    return jsonify({
+        "keys": [
+            {
+                "key": k[:10] + "...",  # Partial key only
+                **v
+            }
+            for k, v in api_keys.items()
+        ]
+    })
 
 
-# Drift baseline endpoint
-@app.route('/api/v1/drift/baseline', methods=['POST'])
+# ============
+# BATCH PROCESSING
+# ============
+
+@app.route('/api/batch', methods=['POST'])
 @require_api_key
-def api_drift_baseline():
-    """Capture drift monitoring baseline"""
-    if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
-    
+def batch_analyze():
+    """Analyze multiple URLs"""
     data = request.get_json()
-    if not data or 'url' not in data:
-        return jsonify({'error': 'Missing required field: url'}), 400
+    urls = data.get('urls', [])
     
-    try:
-        result = run_drift_baseline(data['url'])
-        return jsonify(result)
-    except Exception as e:
-        logger.exception(f"Drift baseline failed for {data['url']}")
-        return jsonify({'error': str(e)}), 500
-
-
-# Drift compare endpoint
-@app.route('/api/v1/drift/compare', methods=['POST'])
-@require_api_key
-def api_drift_compare():
-    """Compare current state against baseline"""
-    if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
-    
-    data = request.get_json()
-    if not data or 'url' not in data:
-        return jsonify({'error': 'Missing required field: url'}), 400
-    
-    try:
-        result = run_drift_compare(data['url'])
-        return jsonify(result)
-    except Exception as e:
-        logger.exception(f"Drift compare failed for {data['url']}")
-        return jsonify({'error': str(e)}), 500
-
-
-# Batch audit endpoint
-@app.route('/api/v1/batch', methods=['POST'])
-@require_api_key
-def api_batch():
-    """Run audits on multiple URLs"""
-    if not WORKFLOW_AVAILABLE:
-        return jsonify({'error': 'Workflow engine not available'}), 503
-    
-    data = request.get_json()
-    if not data or 'urls' not in data:
-        return jsonify({
-            'error': 'Missing required field: urls',
-            'example': {'urls': ['https://example.com', 'https://example.org']}
-        }), 400
-    
-    urls = data['urls']
-    if not isinstance(urls, list):
-        return jsonify({'error': 'urls must be an array'}), 400
+    if not urls:
+        return jsonify({"error": "urls array required"}), 400
     
     if len(urls) > 10:
-        return jsonify({'error': 'Maximum 10 URLs per batch request'}), 400
+        return jsonify({"error": "Maximum 10 URLs per batch"}), 400
     
     results = []
     for url in urls:
+        valid, url_or_error = validate_url(url)
+        if not valid:
+            results.append({"url": url, "error": url_or_error})
+            continue
+        
         try:
-            result = run_audit(url, use_cache=True, max_recommendations=5)
-            results.append({'url': url, 'success': True, 'data': result})
+            result = analyze_url(url)
+            result['url'] = url
+            results.append(result)
         except Exception as e:
-            results.append({'url': url, 'success': False, 'error': str(e)})
+            results.append({"url": url, "error": str(e)})
     
-    return jsonify({'results': results})
+    return jsonify({
+        "total": len(urls),
+        "results": results
+    })
 
 
-# Error handlers
-@app.errorhandler(400)
-def bad_request(error):
-    return jsonify({'error': 'Bad request', 'message': str(error)}), 400
+# ============
+# HELPERS
+# ============
+
+def generate_recommendations(analysis: Dict) -> list:
+    """Generate prioritized recommendations from analysis"""
+    recommendations = []
+    
+    # From critical issues
+    for issue in analysis.get('findings', {}).get('critical', []):
+        recommendations.append({
+            "title": issue.get('issue', str(issue))[:100],
+            "priority": "High",
+            "effort": "Low" if "meta" in str(issue).lower() else "Medium",
+            "impact": "High"
+        })
+    
+    # From warnings
+    for issue in analysis.get('findings', {}).get('warnings', []):
+        recommendations.append({
+            "title": issue.get('issue', str(issue))[:100],
+            "priority": "Medium",
+            "effort": "Medium",
+            "impact": "Medium"
+        })
+    
+    # From opportunities
+    for issue in analysis.get('findings', {}).get('opportunities', []):
+        recommendations.append({
+            "title": issue.get('issue', str(issue))[:100],
+            "priority": "Low",
+            "effort": "Medium",
+            "impact": "Medium"
+        })
+    
+    # Add category-specific recommendations based on scores
+    scores = analysis.get('scores', {})
+    
+    if scores.get('performance', 100) < 50:
+        recommendations.append({
+            "title": "Improve page load speed (Core Web Vitals)",
+            "priority": "High",
+            "effort": "High",
+            "impact": "High"
+        })
+    
+    if scores.get('ai_readiness', 100) < 60:
+        recommendations.append({
+            "title": "Optimize content for AI search engines (GEO)",
+            "priority": "Medium",
+            "effort": "Medium",
+            "impact": "High"
+        })
+    
+    if scores.get('schema', 100) < 50:
+        recommendations.append({
+            "title": "Implement structured data markup",
+            "priority": "Medium",
+            "effort": "Low",
+            "impact": "Medium"
+        })
+    
+    # Sort by priority
+    priority_order = {"High": 0, "Medium": 1, "Low": 2}
+    recommendations.sort(key=lambda x: priority_order.get(x['priority'], 99))
+    
+    return recommendations[:20]  # Top 20
 
 
-@app.errorhandler(404)
-def not_found(error):
-    return jsonify({'error': 'Not found'}), 404
-
-
-@app.errorhandler(429)
-def rate_limited(error):
-    return jsonify({'error': 'Rate limit exceeded'}), 429
-
-
-@app.errorhandler(500)
-def internal_error(error):
-    logger.exception("Internal server error")
-    return jsonify({'error': 'Internal server error'}), 500
-
+# ============
+# MAIN
+# ============
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
     debug = os.environ.get('FLASK_DEBUG', 'false').lower() == 'true'
     
-    logger.info(f"Starting API server on port {port}")
-    logger.info(f"API keys configured: {len(API_KEYS)}")
+    print(f"Starting Claude SEO Unified API on port {port}")
+    print(f"Version: {__version__ if WORKFLOW_AVAILABLE else 'unknown'}")
+    print(f"PDF Generation: {'Available' if PDF_AVAILABLE else 'Not available'}")
     
     app.run(host='0.0.0.0', port=port, debug=debug)

@@ -28,6 +28,7 @@ selenium>=4.15.0
 weasyprint>=60.0
 matplotlib>=3.8.0
 pillow>=10.0.0
+reportlab>=4.0.0
 
 # API integrations
 anthropic>=0.7.0
