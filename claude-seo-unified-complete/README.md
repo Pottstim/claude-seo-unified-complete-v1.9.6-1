@@ -1,5 +1,9 @@
 # Claude SEO - Unified Skills Package
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Python 3.10+](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
+[![Version](https://img.shields.io/badge/version-1.9.6--unified-green.svg)](https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1)
+
 **Combined best-of-both from Claude SEO + Codex SEO**
 
 This unified package merges the Claude Code MCP skills (21 workflows) with Codex SEO's advanced features (26 workflows, deterministic runners, premium reports) into a single installation for Claude Desktop.
@@ -40,9 +44,14 @@ This unified package merges the Claude Code MCP skills (21 workflows) with Codex
 2. **Install Python dependencies**:
 ```bash
 cd ~/.claude/skills/seo
+
+# Core dependencies (minimal)
 python3 -m venv .venv
 source .venv/bin/activate  # On Windows: .venv\Scripts\activate
-pip install -r requirements.txt
+pip install -r requirements-core.txt
+
+# Optional: Full dependencies (for screenshots, PDF, browser automation)
+pip install -r requirements-optional.txt
 ```
 
 3. **Install Playwright** (optional, for screenshots/PDF):
@@ -50,7 +59,12 @@ pip install -r requirements.txt
 playwright install chromium
 ```
 
-4. **Restart Claude Desktop**
+4. **Run tests** (optional):
+```bash
+pytest tests/ -v
+```
+
+5. **Restart Claude Desktop**
 
 ### Quick Start
 
@@ -165,12 +179,43 @@ output/                            # Reports and artifacts
 | SXO analysis | ✅ | ✅ | ✅ |
 | FLOW framework | ✅ | ✅ | ✅ |
 
+## Testing
+
+Run the test suite to verify your installation:
+
+```bash
+# Unit tests (no network required)
+pytest tests/test_workflow.py -v
+
+# Integration tests (requires network)
+pytest tests/test_integration.py -v -m integration
+
+# All tests
+pytest tests/ -v
+```
+
 ## Requirements
 
-- Python 3.10+
-- Claude Desktop (for MCP mode)
-- Optional: Playwright (screenshots/PDF)
-- Optional: API keys (DataForSEO, Google, etc.)
+- **Python 3.10+**
+- **Claude Desktop** (for MCP mode)
+
+### Core Dependencies
+- requests - HTTP client
+- beautifulsoup4 - HTML parsing
+- lxml - XML processing
+- pyyaml - Configuration
+- pandas - Data processing
+- aiohttp - Async HTTP
+
+### Optional Dependencies
+- playwright - Screenshots, browser automation
+- selenium - Alternative browser automation
+- weasyprint - PDF report generation
+- matplotlib - Charts in reports
+- anthropic/openai - AI integrations
+
+Install core only: `pip install -r requirements-core.txt`
+Install everything: `pip install -r requirements-optional.txt`
 
 ## License
 
@@ -193,4 +238,17 @@ Built for Claude Desktop by the AI Marketing Hub community.
 ---
 
 **Package assembled:** 2026-04-28  
+**Last updated:** 2026-05-13  
 **Version:** 1.9.6-unified
+
+### Changelog
+
+**v1.9.6-unified (2026-05-13)**
+- Added MIT LICENSE file
+- Implemented full `run_skill_workflow.py` with actual SEO analysis
+- Split requirements into core (`requirements-core.txt`) and optional (`requirements-optional.txt`)
+- Added comprehensive test suite (`tests/`)
+- Created modular skill files in `skills/` directory
+- Created agent definition files in `agents/` directory
+- Added reference documentation (`references/`)
+- Added pytest configuration
