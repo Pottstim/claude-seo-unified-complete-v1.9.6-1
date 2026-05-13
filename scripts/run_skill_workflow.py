@@ -4,7 +4,7 @@ Headless workflow executor for claude-seo-unified
 Enables deterministic execution in CI/CD, cron, or API mode
 """
 
-__version__ = "1.9.6-unified"
+__version__ = "1.9.7-unified"
 
 import sys
 import os
@@ -297,9 +297,31 @@ def analyze_onpage(html: str, url: str) -> Dict[str, Any]:
         checks["heading_hierarchy"] = {"status": "warning", "h1": h1_count, "note": "Multiple H1s"}
         issues.append({"severity": "medium", "issue": f"Multiple H1 tags ({h1_count})"})
     
-    # Internal links
+    # Internal links - improved detection for relative, protocol-relative, and absolute URLs
     links = soup.find_all("a", href=True)
-    internal_links = [l for l in links if urlparse(l["href"]).netloc == urlparse(url).netloc or l["href"].startswith("/")]
+    base_parsed = urlparse(url)
+    internal_links = []
+    
+    for link in links:
+        href = link["href"]
+        parsed_href = urlparse(href)
+        
+        # Empty href or javascript: skip
+        if not href or href.startswith(("javascript:", "mailto:", "tel:", "#")):
+            continue
+        
+        # Relative URL (empty netloc) - always internal
+        # Protocol-relative URL (//example.com) - check netloc
+        # Absolute URL - check netloc match
+        is_internal = (
+            not parsed_href.netloc or  # Relative URL
+            parsed_href.netloc == base_parsed.netloc or  # Same domain
+            (href.startswith("//") and parsed_href.netloc == base_parsed.netloc)  # Protocol-relative
+        )
+        
+        if is_internal:
+            internal_links.append(link)
+    
     if len(internal_links) >= 3:
         score += 5
         checks["internal_links"] = {"status": "pass", "count": len(internal_links)}
@@ -325,10 +347,9 @@ def analyze_content(html: str, url: str) -> Dict[str, Any]:
     
     # Focus on main content areas only (not nav, footer, etc.)
     main_content = soup.find("main") or soup.find("article") or soup.find("div", class_=re.compile(r"(content|post|article|entry)", re.I)) or soup
-    content_text = main_content.get_text()
     
-    # Remove script and style for text analysis
-    for element in main_content(["script", "style", "nav", "footer", "header", "aside"]):
+    # Remove script and style for text analysis - use list() to materialize iterator before mutation
+    for element in list(main_content.find_all(["script", "style", "nav", "footer", "header", "aside"])):
         element.decompose()
     
     text = main_content.get_text()
@@ -528,7 +549,7 @@ def analyze_ai_readiness(html: str, url: str) -> Dict[str, Any]:
 def analyze_images(html: str, url: str) -> Dict[str, Any]:
     """Analyze image SEO"""
     if not BS4_AVAILABLE:
-        return {"score": 0, "max_score": 5, "error": "BeautifulSoup not available"}
+        return {"score": None, "max_score": 5, "error": "BeautifulSoup not available", "issues": []}
     
     soup = BeautifulSoup(html, 'lxml')
     score = 0
@@ -537,8 +558,16 @@ def analyze_images(html: str, url: str) -> Dict[str, Any]:
     
     images = soup.find_all("img")
     
+    # No images found - return None score so it's excluded from health calculation
+    # A page with no images hasn't "passed" image SEO, it has nothing to evaluate
     if not images:
-        return {"score": 5, "max_score": 5, "images": 0, "issues": [], "note": "No images found"}
+        return {
+            "score": None,  # None = skip in health score calculation
+            "max_score": 5,
+            "images": 0,
+            "issues": [],
+            "note": "No images found - category excluded from health score"
+        }
     
     # Check alt text
     with_alt = [img for img in images if img.get("alt")]
@@ -592,14 +621,19 @@ def calculate_health_score(results: Dict[str, Dict]) -> Tuple[int, Dict[str, int
     for category, weight in weights.items():
         if category in results and "error" not in results[category]:
             result = results[category]
-            cat_score = result.get("score", 0)
+            cat_score = result.get("score")
+            
+            # Skip categories with None score (e.g., no images on page)
+            if cat_score is None:
+                continue
+            
             cat_max = result.get("max_score", weight)
             normalized = (cat_score / max(cat_max, 1)) * weight
             scores[category] = round(normalized)
             total_score += normalized
-            total_weight += weight
+            total_weight += weight  # IMPORTANT: Must increment total_weight for each valid category
         elif category in weights:
-            # Category not analyzed, skip from weight calculation
+            # Category not analyzed or has error, skip from weight calculation
             pass
     
     # Only count weight for categories that were actually analyzed
@@ -875,10 +909,13 @@ Examples:
     
     args = parser.parse_args()
     
-    # Handle --version
+    # Handle missing workflow - return error instead of just showing help
     if not args.workflow:
-        parser.print_help()
-        return 0
+        print("Error: No workflow specified", file=sys.stderr)
+        print("Usage: python run_skill_workflow.py <workflow> --url <url>", file=sys.stderr)
+        print("\nAvailable workflows: audit, technical, content, schema, drift-baseline, drift-compare", file=sys.stderr)
+        print("Use --help for more information", file=sys.stderr)
+        return 1
     
     # Validate URL is provided for workflows that need it
     if args.workflow not in ["help"] and not args.url:
