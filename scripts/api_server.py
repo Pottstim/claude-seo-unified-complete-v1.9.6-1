@@ -11,10 +11,41 @@ import time
 import uuid
 import hashlib
 import secrets
+import signal
+import atexit
+import logging
 from datetime import datetime, timezone, timedelta
 from functools import wraps
 from typing import Dict, Any, Optional
 from collections import defaultdict
+
+# Sentry integration (optional)
+SENTRY_DSN = os.environ.get("SENTRY_DSN")
+if SENTRY_DSN:
+    try:
+        import sentry_sdk
+        from sentry_sdk.integrations.flask import FlaskIntegration
+        
+        sentry_sdk.init(
+            dsn=SENTRY_DSN,
+            integrations=[FlaskIntegration()],
+            traces_sample_rate=0.1,
+            environment=os.environ.get("ENVIRONMENT", "production")
+        )
+        print("✅ Sentry initialized")
+    except ImportError:
+        print("⚠️  Sentry DSN set but sentry-sdk not installed")
+
+# Structured logging
+import structlog
+structlog.configure(
+    processors=[
+        structlog.stdlib.add_log_level,
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.JSONRenderer()
+    ]
+)
+logger = structlog.get_logger()
 
 # Add parent to path for imports
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -43,7 +74,16 @@ except ImportError:
 
 # Initialize Flask
 app = Flask(__name__)
-CORS(app)
+CORS(app, origins=os.environ.get("CORS_ORIGINS", "*").split(","))
+
+# Security headers
+@app.after_request
+def add_security_headers(response):
+    response.headers['X-Content-Type-Options'] = 'nosniff'
+    response.headers['X-Frame-Options'] = 'DENY'
+    response.headers['X-XSS-Protection'] = '1; mode=block'
+    response.headers['Strict-Transport-Security'] = 'max-age=31536000; includeSubDomains'
+    return response
 
 # Configuration
 app.config['SECRET_KEY'] = os.environ.get('API_SECRET_KEY', secrets.token_hex(32))
@@ -54,6 +94,26 @@ analysis_cache: Dict[str, Dict] = {}
 api_keys: Dict[str, Dict] = {}  # api_key -> {name, email, created, requests}
 rate_limits: Dict[str, list] = defaultdict(list)  # ip -> [timestamps]
 pending_emails: list = []  # Email queue (use Celery/Redis in production)
+
+# Graceful shutdown
+shutting_down = False
+
+def signal_handler(signum, frame):
+    """Handle shutdown signals gracefully"""
+    global shutting_down
+    logger.info("Shutdown signal received", signal=signum)
+    shutting_down = True
+    
+    # Wait for in-flight requests
+    logger.info("Waiting for in-flight requests to complete...")
+    time.sleep(5)
+    
+    logger.info("Shutdown complete")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
+atexit.register(lambda: logger.info("Application exiting"))
 
 
 # ============

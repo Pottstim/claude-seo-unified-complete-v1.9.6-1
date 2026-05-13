@@ -71,7 +71,7 @@ def load_config(config_path: str = "config/config.yaml") -> Dict[str, Any]:
 
 
 def validate_url(url: str) -> Tuple[bool, str]:
-    """Validate URL format and scheme"""
+    """Validate URL format, scheme, and SSRF protection"""
     if not url:
         return False, "URL is required"
     
@@ -81,6 +81,38 @@ def validate_url(url: str) -> Tuple[bool, str]:
     parsed = urlparse(url)
     if not parsed.netloc:
         return False, "Invalid URL: missing domain"
+    
+    # SSRF protection - block localhost and private IPs
+    hostname = parsed.netloc.split(':')[0].lower()
+    
+    # Block localhost
+    if hostname in ('localhost', '127.0.0.1', '::1', '0.0.0.0'):
+        return False, "Access to localhost is not allowed"
+    
+    # Block private IP ranges (10.x, 172.16-31.x, 192.168.x)
+    import ipaddress
+    import socket
+    try:
+        # Resolve the hostname to an IP to prevent DNS rebinding
+        ip = socket.gethostbyname(hostname)
+        ip_obj = ipaddress.ip_address(ip)
+        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_link_local or ip_obj.is_reserved:
+            return False, "Access to private/internal IPs is not allowed"
+    except socket.gaierror:
+        # DNS resolution failed, let it fail in the request naturally or block it
+        pass
+    except ValueError:
+        # Not an IP address, likely a domain - check for internal patterns
+        if hostname.endswith('.local') or hostname.endswith('.internal') or hostname.endswith('.localhost'):
+            return False, "Access to internal domains is not allowed"
+    
+    # Block AWS metadata endpoint
+    if hostname == '169.254.169.254':
+        return False, "Access to metadata endpoints is not allowed"
+    
+    # Max URL length
+    if len(url) > 2048:
+        return False, "URL exceeds maximum length (2048 characters)"
     
     return True, url
 
