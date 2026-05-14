@@ -1,0 +1,250 @@
+version: '3.8'
+
+services:
+  # ============================================================
+  # Application Services
+  # ============================================================
+  
+  app:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: claude-seo-unified:latest
+    container_name: seo-unified-app
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+      - "9090:9090"  # Prometheus metrics
+    environment:
+      - ENVIRONMENT=production
+      - PORT=5000
+      - DATABASE_URL=postgresql://seo_user:${DB_PASSWORD}@postgres:5432/seo_unified
+      - REDIS_URL=redis://redis:6379/0
+      - CORS_ORIGINS=https://yourdomain.com
+      - ALLOWED_HOSTS=yourdomain.com,api.yourdomain.com
+      - API_SECRET_KEY=${API_SECRET_KEY}
+      - JWT_SECRET=${JWT_SECRET}
+      - SENTRY_DSN=${SENTRY_DSN}
+      - PROMETHEUS_ENABLED=true
+      - LOG_LEVEL=WARNING
+    volumes:
+      - ../logs:/var/log/seo-unified:rw
+      - ../output:/var/lib/seo-unified/output:rw
+      - ../.seo-cache:/var/cache/seo-unified:rw
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - seo-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+
+  # Worker for background tasks
+  worker:
+    build:
+      context: ..
+      dockerfile: deploy/Dockerfile
+    image: claude-seo-unified:latest
+    container_name: seo-unified-worker
+    restart: unless-stopped
+    command: python -m scripts.worker
+    environment:
+      - ENVIRONMENT=production
+      - DATABASE_URL=postgresql://seo_user:${DB_PASSWORD}@postgres:5432/seo_unified
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - LOG_LEVEL=INFO
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - seo-network
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 1G
+
+  # ============================================================
+  # Database
+  # ============================================================
+  
+  postgres:
+    image: postgres:16-alpine
+    container_name: seo-unified-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=seo_user
+      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=seo_unified
+      - PGDATA=/var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seo_user -d seo_unified"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - seo-network
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 2G
+
+  # ============================================================
+  # Caching
+  # ============================================================
+  
+  redis:
+    image: redis:7-alpine
+    container_name: seo-unified-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --maxmemory 512mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - seo-network
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 512M
+
+  # ============================================================
+  # Monitoring
+  # ============================================================
+  
+  prometheus:
+    image: prom/prometheus:v2.50.0
+    container_name: seo-unified-prometheus
+    restart: unless-stopped
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.time=30d'
+      - '--web.enable-lifecycle'
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    ports:
+      - "9091:9090"
+    networks:
+      - seo-network
+    profiles:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: seo-unified-grafana
+    restart: unless-stopped
+    environment:
+      - GF_SECURITY_ADMIN_USER=admin
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      - GF_INSTALL_PLUGINS=redis-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    networks:
+      - seo-network
+    profiles:
+      - monitoring
+
+  # ============================================================
+  # Reverse Proxy
+  # ============================================================
+  
+  nginx:
+    image: nginx:alpine
+    container_name: seo-unified-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - app
+    networks:
+      - seo-network
+    profiles:
+      - production
+
+  # ============================================================
+  # Log Aggregation
+  # ============================================================
+  
+  loki:
+    image: grafana/loki:2.9.0
+    container_name: seo-unified-loki
+    restart: unless-stopped
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki-data:/loki
+    networks:
+      - seo-network
+    profiles:
+      - monitoring
+
+  promtail:
+    image: grafana/promtail:2.9.0
+    container_name: seo-unified-promtail
+    restart: unless-stopped
+    volumes:
+      - ../logs:/var/log/seo-unified:ro
+      - ./promtail-config.yml:/etc/promtail/config.yml:ro
+    depends_on:
+      - loki
+    networks:
+      - seo-network
+    profiles:
+      - monitoring
+
+# ============================================================
+# Networks
+# ============================================================
+
+networks:
+  seo-network:
+    driver: bridge
+
+# ============================================================
+# Volumes
+# ============================================================
+
+volumes:
+  postgres-data:
+    driver: local
+  redis-data:
+    driver: local
+  prometheus-data:
+    driver: local
+  grafana-data:
+    driver: local
+  loki-data:
+    driver: local

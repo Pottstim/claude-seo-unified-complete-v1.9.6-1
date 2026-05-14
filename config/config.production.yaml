@@ -1,0 +1,230 @@
+# Claude SEO Unified - Production Configuration
+# Copy to config.yaml for production deployment
+
+project:
+  name: "SEO Analysis Platform"
+  version: "1.9.8"
+  author: "Legrand Consulting"
+
+# Core settings - PRODUCTION HARDENED
+core:
+  debug: false
+  log_level: "WARNING"  # Reduced verbosity for production
+  log_file: "/var/log/seo-unified/app.log"
+  log_max_size: "100MB"
+  log_backup_count: 10
+  cache_enabled: true
+  cache_dir: "/var/cache/seo-unified"
+  output_dir: "/var/lib/seo-unified/output"
+  temp_dir: "/tmp/seo-unified"
+  
+# Execution mode - PRODUCTION
+execution:
+  mode: "api"
+  prefer_api: true
+  parallel_agents: 5  # Conservative for production
+  max_concurrent_requests: 10
+  timeout_seconds: 120
+  retry_attempts: 3
+  retry_delay_seconds: 5
+  retry_backoff_multiplier: 2.0  # Exponential backoff
+  request_timeout: 30
+  connect_timeout: 10
+
+# Database - PostgreSQL (Production)
+database:
+  type: "postgresql"
+  host: "${DB_HOST}"
+  port: 5432
+  name: "seo_unified"
+  user: "${DB_USER}"
+  password: "${DB_PASSWORD}"
+  pool_size: 10
+  max_overflow: 20
+  pool_timeout: 30
+  echo: false
+
+# Redis Cache
+redis:
+  host: "${REDIS_HOST:-localhost}"
+  port: 6379
+  db: 0
+  password: "${REDIS_PASSWORD}"
+  default_ttl: 3600  # 1 hour
+  max_connections: 50
+
+# API Server - Production Settings
+api:
+  host: "0.0.0.0"
+  port: 5000
+  workers: 4
+  threads: 2
+  timeout: 120
+  keepalive: 5
+  max_requests: 1000
+  max_requests_jitter: 100
+  accesslog: "/var/log/seo-unified/access.log"
+  errorlog: "/var/log/seo-unified/error.log"
+  loglevel: "warning"
+
+# Rate Limiting - Stricter for Production
+rate_limits:
+  default:
+    requests: 100
+    window_seconds: 60
+  audit:
+    requests: 10
+    window_seconds: 60
+  analyze:
+    requests: 30
+    window_seconds: 60
+  report:
+    requests: 20
+    window_seconds: 300
+
+# Security - Production
+security:
+  cors_origins: "${CORS_ORIGINS}"
+  allowed_hosts: "${ALLOWED_HOSTS}"
+  api_key_required: true
+  api_key_header: "X-API-Key"
+  jwt_secret: "${JWT_SECRET}"
+  jwt_expiry_hours: 24
+  csrf_protection: true
+  secure_cookies: true
+  hsts_max_age: 31536000  # 1 year
+  hsts_include_subdomains: true
+  csp_policy: "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; frame-ancestors 'none'"
+  frame_options: "DENY"
+  content_type_options: "nosniff"
+  xss_protection: "1; mode=block"
+  referrer_policy: "strict-origin-when-cross-origin"
+
+# Monitoring
+monitoring:
+  enabled: true
+  sentry_dsn: "${SENTRY_DSN}"
+  sentry_environment: "production"
+  sentry_traces_sample_rate: 0.1
+  sentry_profiles_sample_rate: 0.1
+  prometheus_enabled: true
+  prometheus_port: 9090
+  health_check_path: "/api/health"
+  health_check_interval: 30
+  metrics_prefix: "seo_unified"
+
+# Logging
+logging:
+  format: "json"
+  level: "WARNING"
+  include_request_id: true
+  include_user_id: true
+  include_duration: true
+  log_query_params: false  # Security: don't log sensitive params
+  log_request_body: false
+  log_response_body: false
+  redact_fields:
+    - "password"
+    - "api_key"
+    - "token"
+    - "secret"
+    - "authorization"
+
+# LLM Provider - Production
+llm:
+  active_provider: "${LLM_PROVIDER:-anthropic}"
+  request_timeout: 60
+  max_retries: 3
+  fallback_enabled: true
+  fallback_provider: "${LLM_FALLBACK_PROVIDER:-openai}"
+  cost_tracking: true
+  daily_budget_limit: 100  # USD
+  
+  providers:
+    anthropic:
+      api_key: "${ANTHROPIC_API_KEY}"
+      model: "claude-sonnet-4-20250514"
+      fallback_model: "claude-3-5-haiku-20241022"
+      max_tokens: 4096
+      temperature: 0.3  # Lower for production consistency
+      
+    openai:
+      api_key: "${OPENAI_API_KEY}"
+      model: "gpt-4o"
+      fallback_model: "gpt-4o-mini"
+      max_tokens: 4096
+      temperature: 0.3
+
+# Browser Automation - Production
+browser:
+  headless: true
+  user_agent: "Mozilla/5.0 (compatible; SEO-Unified-Bot/1.9; +https://yourdomain.com/bot)"
+  disable_images: true  # Faster, less bandwidth
+  disable_javascript: false
+  disable_css: true
+  timeout: 30
+  navigation_timeout: 30
+  wait_after_load: 1
+  screenshot_enabled: false  # Disable for production performance
+  sandbox_enabled: true  # Security
+  proxy_enabled: false
+  proxy_url: "${PROXY_URL}"
+
+# Performance Tuning
+performance:
+  cache_ttl:
+    page_analysis: 86400  # 24 hours
+    serp_data: 3600  # 1 hour
+    schema_analysis: 86400
+    backlinks: 21600  # 6 hours
+  concurrent_requests_per_domain: 2
+  request_delay_ms: 100
+  circuit_breaker:
+    enabled: true
+    failure_threshold: 5
+    recovery_timeout: 60
+    half_open_requests: 3
+
+# PDF Reports - Production
+reports:
+  storage_backend: "s3"  # or "local", "gcs", "azure"
+  s3_bucket: "${REPORTS_S3_BUCKET}"
+  s3_region: "${AWS_REGION}"
+  s3_prefix: "reports/"
+  retention_days: 90
+  max_file_size: "50MB"
+  branding:
+    company_name: "Your Company"
+    logo_url: "https://yourdomain.com/logo.png"
+    primary_color: "#2563eb"
+    contact_email: "reports@yourdomain.com"
+    website: "https://yourdomain.com"
+
+# Alerting
+alerting:
+  enabled: true
+  channels:
+    - type: "slack"
+      webhook_url: "${SLACK_WEBHOOK_URL}"
+      severity_threshold: "ERROR"
+    - type: "email"
+      recipients: "${ALERT_EMAIL_RECIPIENTS}"
+      smtp_host: "${SMTP_HOST}"
+      smtp_port: 587
+      smtp_user: "${SMTP_USER}"
+      smtp_password: "${SMTP_PASSWORD}"
+      severity_threshold: "CRITICAL"
+
+# Feature Flags
+features:
+  ai_analysis: true
+  competitor_analysis: true
+  backlink_analysis: true
+  schema_markup: true
+  performance_analysis: true
+  content_quality: true
+  local_seo: true
+  geo_optimization: true
+  drift_monitoring: true
+  pdf_reports: true
+  white_label: false  # Enable for agency use

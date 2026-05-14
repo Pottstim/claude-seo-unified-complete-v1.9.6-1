@@ -1,0 +1,273 @@
+[build-system]
+requires = ["setuptools>=68.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-seo-unified"
+version = "1.9.8"
+description = "Comprehensive SEO analysis toolkit with 26+ workflows, REST API, and flexible provider system"
+readme = "README.md"
+license = {text = "MIT"}
+authors = [
+    {name = "Legrand Consulting", email = "llegrandconsulting@gmail.com"}
+]
+maintainers = [
+    {name = "Legrand Consulting", email = "llegrandconsulting@gmail.com"}
+]
+keywords = [
+    "seo",
+    "analysis",
+    "audit",
+    "technical-seo",
+    "content-quality",
+    "schema-markup",
+    "core-web-vitals",
+    "ai-search",
+    "geo",
+    "claude",
+    "automation"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Framework :: Flask",
+    "Topic :: Internet :: WWW/HTTP :: Site Management",
+    "Topic :: Office/Business",
+    "Topic :: Text Processing :: Markup :: HTML",
+    "Typing :: Typed"
+]
+requires-python = ">=3.10"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=4.9.0",
+    "pyyaml>=6.0",
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "jsonschema>=4.19.0",
+    "aiohttp>=3.9.0",
+    "flask>=3.0.0",
+    "flask-cors>=4.0.0",
+    "werkzeug>=3.0.0",
+    "structlog>=24.1.0",
+    "python-dotenv>=1.0.0",
+    "backoff>=2.2.0",
+]
+
+[project.optional-dependencies]
+database = [
+    "sqlalchemy>=2.0.0",
+    "psycopg2-binary>=2.9.9",
+    "redis>=5.0.0",
+    "alembic>=1.13.0",
+]
+production = [
+    "gunicorn>=21.0.0",
+    "uvicorn>=0.27.0",
+    "sentry-sdk>=1.40.0",
+    "prometheus-flask-exporter>=0.23.0",
+    "opentelemetry-api>=1.22.0",
+    "opentelemetry-sdk>=1.22.0",
+    "cryptography>=41.0.0",
+    "pyjwt>=2.8.0",
+    "orjson>=3.9.0",
+]
+browser = [
+    "playwright>=1.40.0",
+    "selenium>=4.15.0",
+]
+pdf = [
+    "weasyprint>=60.0",
+    "reportlab>=4.0.0",
+    "markdown>=3.5.0",
+]
+llm = [
+    "anthropic>=0.18.0",
+    "openai>=1.12.0",
+    "groq>=0.4.0",
+]
+testing = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-xdist>=3.5.0",
+    "faker>=22.0.0",
+    "freezegun>=1.4.0",
+    "locust>=2.20.0",
+]
+dev = [
+    "ruff>=0.2.0",
+    "bandit>=1.7.0",
+    "safety>=3.0.0",
+    "mypy>=1.8.0",
+    "black>=24.0.0",
+    "isort>=5.13.0",
+]
+all = [
+    "claude-seo-unified[database,production,browser,pdf,llm,testing,dev]",
+]
+
+[project.scripts]
+seo-unified = "scripts.run_skill_workflow:main"
+seo-api = "scripts.api_server:main"
+
+[project.urls]
+Homepage = "https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1"
+Documentation = "https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1#readme"
+Repository = "https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1.git"
+Issues = "https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1/issues"
+Changelog = "https://github.com/Pottstim/claude-seo-unified-complete-v1.9.6-1/blob/master/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["scripts*", "config*"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml", "*.json", "*.md"]
+
+# ============================================================
+# Tool Configurations
+# ============================================================
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+exclude = [
+    ".git",
+    ".github",
+    ".venv",
+    "__pycache__",
+    "node_modules",
+    "*.egg-info",
+    "build",
+    "dist",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # Pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "C4",     # flake8-comprehensions
+    "UP",     # pyupgrade
+    "ARG",    # flake8-unused-arguments
+    "SIM",    # flake8-simplify
+    "TCH",    # flake8-type-checking
+    "RUF",    # Ruff-specific rules
+]
+ignore = [
+    "E501",   # line too long (handled by formatter)
+    "B008",   # do not perform function calls in argument defaults
+    "B905",   # zip without explicit strict
+    "ARG001", # unused function argument
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["scripts", "config"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["ARG", "S101"]
+"scripts/api_server.py" = ["B008"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+disallow_incomplete_defs = true
+check_untyped_defs = true
+disallow_untyped_decorators = true
+no_implicit_optional = true
+warn_redundant_casts = true
+warn_unused_ignores = true
+warn_no_return = true
+follow_imports = "silent"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "tests.*"
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-v",
+    "--tb=short",
+    "--strict-markers",
+    "--cov=scripts",
+    "--cov-report=term-missing",
+    "--cov-report=xml",
+    "--cov-fail-under=50",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]
+asyncio_mode = "auto"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+
+[tool.coverage.run]
+source = ["scripts"]
+branch = true
+omit = [
+    "tests/*",
+    "*/__pycache__/*",
+    "*/site-packages/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@abstractmethod",
+]
+precision = 2
+show_missing = true
+skip_covered = false
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101", "B601"]
+
+[tool.black]
+target-version = ["py310", "py311", "py312"]
+line-length = 100
+include = '\.pyi?$'
+exclude = '''
+/(
+    \.git
+    | \.github
+    | \.venv
+    | __pycache__
+    | node_modules
+    | build
+    | dist
+    | \.eggs
+    | .*\.egg-info
+)/
+'''
+
+[tool.isort]
+profile = "black"
+line_length = 100
+known_first_party = ["scripts", "config"]
+skip = [".git", ".github", ".venv", "__pycache__", "node_modules"]
